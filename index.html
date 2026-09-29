@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id" data-theme="light" data-layout="desktop">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Warehouse</title>
+<meta name="theme-color" content="#1D5FD1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/themes.css">
+<link rel="stylesheet" href="css/main.css">
+<script>
+  // Terapkan tema sebelum render agar tidak berkedip.
+  (function () {
+    var t = localStorage.getItem('swl.theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+</head>
+<body>
+<div id="app"></div>
+<noscript>Aplikasi ini membutuhkan JavaScript.</noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

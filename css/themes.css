@@ -1,0 +1,18 @@
+:root, [data-theme="light"] {
+  --bg:#E7EBEE; --panel:#FFFFFF; --panel-2:#F1F4F6; --ink:#18232D; --ink-2:#55636F;
+  --line:#D2DAE0; --accent:#1D5FD1; --accent-ink:#FFFFFF; --accent-soft:#DCE8FB;
+  --hit:#FFB800; --hit-ink:#1A1300; --rack:#C7D1DA; --rack-head:#9FAEBB; --floor:#F5F7F8; --grid:#E1E7EB;
+  --cell:#FFFFFF; --occ:#BCD2F6; --danger:#C62F2F; --ok:#1E8E5A; --warn:#B26A00;
+  --shadow:0 1px 2px rgba(20,35,50,.08);
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --bg:#0F151B; --panel:#18212A; --panel-2:#1F2A35; --ink:#E5ECF2; --ink-2:#93A3B1;
+  --line:#2B3947; --accent:#5E9BFF; --accent-ink:#06182F; --accent-soft:#1F3555;
+  --hit:#FFC21A; --hit-ink:#1A1300; --rack:#2A3846; --rack-head:#3B4E60; --floor:#131B23; --grid:#1B2631;
+  --cell:#202C38; --occ:#2C4C7A; --danger:#FF6B6B; --ok:#46C88D; --warn:#F0A63A;
+  --shadow:none;
+  color-scheme: dark;
+}
+:root { --font: "Bahnschrift","Segoe UI Variable","Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",sans-serif;
+        --mono: ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace; }
