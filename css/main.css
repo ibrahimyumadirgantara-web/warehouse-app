@@ -89,10 +89,10 @@ button{cursor:pointer}
 .map .floor{fill:var(--floor)}
 .map .rack-body{fill:var(--rack);stroke:var(--rack-head);stroke-width:1.5}
 .map .rack-head{fill:var(--rack-head)}
-.map .rack-label{fill:var(--ink);font-family:var(--font);font-weight:700;font-size:max(10px,calc(11px*var(--u,1)));text-anchor:middle}
+.map .rack-label{fill:var(--ink);font-family:var(--font);font-weight:700;font-size:max(14px,calc(11px*var(--u,1)));text-anchor:middle}
 .map .cell rect{fill:var(--cell);stroke:var(--rack-head);stroke-width:1}
 .map .cell.occ rect{fill:var(--occ)}
-.map .cell text{font-family:var(--mono);font-weight:800;font-size:max(10px,calc(13px*var(--u,1)));text-anchor:middle;fill:var(--hit-ink);
+.map .cell text{font-family:var(--mono);font-weight:800;font-size:max(16px,calc(13px*var(--u,1)));text-anchor:middle;fill:var(--hit-ink);
   stroke:var(--hit);stroke-width:calc(3px*var(--u,1));paint-order:stroke;stroke-linejoin:round;pointer-events:none}
 .map .cell.hit rect{fill:var(--hit);stroke:var(--hit-ink);stroke-width:2}
 .map .cell.hit{animation:blink .9s ease-in-out infinite}

@@ -1,7 +1,7 @@
 // core.js — logika murni (tanpa DOM / jaringan). Dipakai UI, store, dan sync.
 
 export const MAP_W = 720, MAP_H = 480;
-export const CELL_W = 46, CELL_H = 20, RACK_HEAD = 18, GRID = 6, MAX_DIM = 5;
+export const CELL_W = 38, CELL_H = 34, RACK_HEAD = 24, GRID = 10, MAX_DIM = 9;
 // true: baris 1 di paling atas rak. Ubah ke false jika baris 1 = paling bawah.
 export const ROW1_ON_TOP = true;
 
@@ -68,20 +68,32 @@ export const defaultRacks = () => [
 export function matchParts(parts, query) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return [];
-  const tokens = q.split(/\s+/);
+
+  // Cari berdasarkan satu field pada satu waktu. Ini mencegah query
+  // "baut 3" cocok ke "baut 1" hanya karena angka 3 kebetulan ada
+  // di kode lokasi seperti A13.
+  const fieldsOf = (p) => [
+    String(p.no || '').toLowerCase(),
+    String(p.name || '').toLowerCase(),
+    String(p.spec || '').toLowerCase(),
+    codeOf(p).toLowerCase(),
+  ];
+
+  const exact = parts.filter((p) => fieldsOf(p).some((f) => f === q));
+  if (exact.length) return exact.sort((a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true }));
+
   const out = [];
   for (const p of parts) {
-    const no = String(p.no).toLowerCase();
-    const name = String(p.name || '').toLowerCase();
-    const code = codeOf(p).toLowerCase();
-    const hay = `${no} ${name} ${String(p.spec || '').toLowerCase()} ${code}`;
-    if (!tokens.every((t) => hay.includes(t))) continue;
-    let s = 40;
-    if (no === q || (code && code === q)) s = 100;
-    else if (no.startsWith(tokens[0])) s = 80;
-    else if (name.startsWith(tokens[0])) s = 60;
-    out.push([s, p]);
+    const fields = fieldsOf(p);
+    const hitField = fields.find((f) => f.includes(q));
+    if (!hitField) continue;
+
+    let score = 40;
+    if (hitField.startsWith(q)) score = 80;
+    else if (hitField.includes(q)) score = 60;
+    out.push([score, p]);
   }
+
   return out
     .sort((a, b) => b[0] - a[0] || String(a[1].no).localeCompare(String(b[1].no), undefined, { numeric: true }))
     .map((x) => x[1]);
