@@ -1,6 +1,6 @@
 // core.js — logika murni (tanpa DOM / jaringan). Dipakai UI, store, dan sync.
 
-export const MAP_W = 600, MAP_H = 300;
+export const MAP_W = 1080, MAP_H = 720;
 export const CELL_W = 70, CELL_H = 25, RACK_HEAD = 20, GRID = 5, MAX_DIM = 5;
 // true: baris 1 di paling atas rak. Ubah ke false jika baris 1 = paling bawah.
 export const ROW1_ON_TOP = true;
