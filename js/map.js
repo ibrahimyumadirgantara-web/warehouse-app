@@ -19,7 +19,13 @@ export function createMap(host, opts) {
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
     s += `<rect class="rack-body" x="0" y="0" width="${w}" height="${h}" rx="6"/>`;
     s += `<rect class="rack-head" width="${RACK_HEAD}" height="${h}" rx="6"/>`;
-    s += `<text class="rack-label" x="${RACK_HEAD / 2}" y="${h / 2}" transform="rotate(-90 ${RACK_HEAD / 2} ${h / 2})">Rak ${esc(r.id)}</text>`;
+    s += `<text class="rack-label" x="${RACK_HEAD / 2}" y="${h / 2 - 24}" text-anchor="middle">
+`;
+    s += `<tspan x="${RACK_HEAD / 2}" dy="0">R</tspan>`;
+    s += `<tspan x="${RACK_HEAD / 2}" dy="14">A</tspan>`;
+    s += `<tspan x="${RACK_HEAD / 2}" dy="14">K</tspan>`;
+    s += `<tspan x="${RACK_HEAD / 2}" dy="14">${esc(r.id)}</tspan>`;
+    s += `</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
         const code = `${r.id}${col}${row}`;
