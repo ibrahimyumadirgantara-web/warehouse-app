@@ -89,7 +89,7 @@ button{cursor:pointer}
 .map .floor{fill:var(--floor)}
 .map .rack-body{fill:var(--rack);stroke:var(--rack-head);stroke-width:1.5}
 .map .rack-head{fill:var(--rack-head)}
-.map .rack-label{fill:var(--ink);font-family:var(--font);font-weight:700;font-size:min(calc(11px*var(--u,1)),13px);text-anchor:middle;dominant-baseline:central}
+.map .rack-label{fill:var(--ink);font-family:var(--font);font-weight:700;font-size:min(calc(11px*var(--u,1)),13px);text-anchor:middle;dominant-baseline:central;pointer-events:none}
 .map .cell rect{fill:var(--cell);stroke:var(--rack-head);stroke-width:1}
 .map .cell.occ rect{fill:var(--occ)}
 .map .cell text{font-family:var(--mono);font-weight:800;font-size:min(calc(12px*var(--u,1)),15px);text-anchor:middle;dominant-baseline:central;fill:var(--hit-ink);

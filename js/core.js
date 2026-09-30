@@ -1,7 +1,7 @@
 // core.js — logika murni (tanpa DOM / jaringan). Dipakai UI, store, dan sync.
 
 export const MAP_W = 900, MAP_H = 560;
-export const CELL_W = 60, CELL_H = 15, RACK_HEAD = 20, GRID = 10, MAX_DIM = 9;
+export const CELL_W = 36, CELL_H = 28, RACK_HEAD = 20, GRID = 10, MAX_DIM = 9;
 // true: baris 1 di paling atas rak. Ubah ke false jika baris 1 = paling bawah.
 export const ROW1_ON_TOP = true;
 
@@ -27,7 +27,8 @@ export const uid = () =>
 export const codeOf = (p) => (p && p.rack ? `${String(p.rack).toUpperCase()}${p.col}${p.row}` : '');
 
 export function rackSize(r) {
-  return { w: r.cols * CELL_W, h: RACK_HEAD + r.rows * CELL_H };
+  // RACK_HEAD sekarang menjadi lebar panel label di sisi kiri rak.
+  return { w: RACK_HEAD + r.cols * CELL_W, h: r.rows * CELL_H };
 }
 export const snap = (v) => Math.round(v / GRID) * GRID;
 export const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -40,7 +41,7 @@ export function clampRack(r) {
 }
 
 export function findFreeSpot(racks, cols, rows) {
-  const w = cols * CELL_W, h = RACK_HEAD + rows * CELL_H, pad = 12;
+  const w = RACK_HEAD + cols * CELL_W, h = rows * CELL_H, pad = 12;
   for (let y = 20; y <= MAP_H - h; y += GRID * 2) {
     for (let x = 20; x <= MAP_W - w; x += GRID * 2) {
       const clash = racks.some((r) => {

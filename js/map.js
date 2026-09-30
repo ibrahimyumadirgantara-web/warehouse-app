@@ -17,28 +17,14 @@ export function createMap(host, opts) {
     const { w, h } = rackSize(r);
     const hasHit = [...hits].some((c) => c.charAt(0) === r.id);
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
-    s += `<rect class="rack-body" width="${w}" height="${h}" rx="6"/>`;
-const LABEL_W = 50;
-
-s += `<rect class="rack-head"
-        x="${-LABEL_W - 6}"
-        y="0"
-        width="${LABEL_W}"
-        height="${h}"
-        rx="8"/>`;
-
-s += `<text class="rack-label"
-        x="${-LABEL_W / 2 - 6}"
-        y="${h / 2}"
-        text-anchor="middle"
-        dominant-baseline="middle">
-        Rak ${esc(r.id)}
-      </text>`;
+    s += `<rect class="rack-body" x="${RACK_HEAD}" width="${w - RACK_HEAD}" height="${h}" rx="6"/>`;
+    s += `<rect class="rack-head" width="${RACK_HEAD}" height="${h}" rx="6"/>`;
+    s += `<text class="rack-label" x="${RACK_HEAD / 2}" y="${h / 2}" transform="rotate(-90 ${RACK_HEAD / 2} ${h / 2})">Rak ${esc(r.id)}</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
         const code = `${r.id}${col}${row}`;
-        const x = (col - 1) * CELL_W;
-        const y = RACK_HEAD + (ROW1_ON_TOP ? row - 1 : r.rows - row) * CELL_H;
+        const x = RACK_HEAD + (col - 1) * CELL_W;
+        const y = (ROW1_ON_TOP ? row - 1 : r.rows - row) * CELL_H;
         const hit = hits.has(code);
         s += `<g class="cell${occ.has(code) ? ' occ' : ''}${hit ? ' hit' : ''}" data-code="${code}">` +
           `<rect x="${x + 2}" y="${y + 2}" width="${CELL_W - 4}" height="${CELL_H - 4}" rx="4"/>` +
