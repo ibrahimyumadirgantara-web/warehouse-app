@@ -22,11 +22,11 @@ export function createMap(host, opts) {
     // Label rak disusun vertikal di dalam kolom label: R / A / K / A
     const lx = RACK_HEAD / 2;
     const ly = h / 2 - 21;
-    s += `<text class="rack-label" x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle">`;
+    s += `<text class="rack-label" x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" style="letter-spacing:0; word-spacing:4px;">`;
     s += `<tspan x="${lx}" dy="0">R</tspan>`;
-    s += `<tspan x="${lx}" dy="14">A</tspan>`;
-    s += `<tspan x="${lx}" dy="14">K</tspan>`;
-    s += `<tspan x="${lx}" dy="14">${esc(r.id)}</tspan>`;
+    s += `<tspan x="${lx}" dy="16">A</tspan>`;
+    s += `<tspan x="${lx}" dy="16">K</tspan>`;
+    s += `<tspan x="${lx}" dy="16">${esc(r.id)}</tspan>`;
     s += `</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
