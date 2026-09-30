@@ -18,8 +18,8 @@ export function createMap(host, opts) {
     const hasHit = [...hits].some((c) => c.charAt(0) === r.id);
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
     s += `<rect class="rack-body" width="${w}" height="${h}" rx="6"/>`;
-    s += `<rect class="rack-head" width="${w}" height="${RACK_HEAD}" rx="6"/>`;
-    s += `<text class="rack-label" x="${w / 2}" y="${RACK_HEAD / 2}">Rak ${esc(r.id)}</text>`;
+  s += `<rect class="rack-head" x="-42" y="0" width="38" height="${h}" rx="6"/>`;
+s += `<text class="rack-label" x="-23" y="${h / 2}">Rak ${esc(r.id)}</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
         const code = `${r.id}${col}${row}`;
