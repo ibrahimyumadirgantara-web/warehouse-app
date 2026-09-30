@@ -1,9 +1,34 @@
-// scanner.js — pindai barcode lewat kamera. Memakai BarcodeDetector bila ada (QR, Code128, EAN, dll.),
-// jika tidak memakai pembaca 1D bawaan (barcode.js). Resolve: teks kode, atau null bila dibatalkan.
-import { decodeCanvas } from './barcode.js';
+// scanner.js — pemindai QR Code 2D lewat kamera.
+// Hanya format QR yang digunakan. Barcode 1D sengaja tidak diproses.
+// jsQR dipakai sebagai fallback QR ketika BarcodeDetector tidak tersedia.
+// Library dimuat hanya saat scanner dibuka agar ukuran awal aplikasi tetap kecil.
+let qrLoader = null;
+function loadQrDecoder() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (qrLoader) return qrLoader;
+  qrLoader = new Promise((resolve, reject) => {
+    const urls = [
+      'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
+      'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+    ];
+    let i = 0;
+    const next = () => {
+      if (window.jsQR) return resolve(window.jsQR);
+      if (i >= urls.length) return reject(new Error('QR decoder gagal dimuat'));
+      const script = document.createElement('script');
+      script.src = urls[i++];
+      script.async = true;
+      script.onload = () => window.jsQR ? resolve(window.jsQR) : next();
+      script.onerror = next;
+      document.head.appendChild(script);
+    };
+    next();
+  }).catch((e) => { qrLoader = null; throw e; });
+  return qrLoader;
+}
 import { toast, icon } from './ui.js';
 
-const FORMATS = ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'data_matrix'];
+const FORMATS = ['qr_code'];
 
 export async function scanBarcode() {
   if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -19,6 +44,7 @@ export async function scanBarcode() {
   }
 
   let detector = null;
+  let qrDecoder = null;
   if ('BarcodeDetector' in window) {
     try {
       const sup = await window.BarcodeDetector.getSupportedFormats();
@@ -26,12 +52,17 @@ export async function scanBarcode() {
       if (formats.length) detector = new window.BarcodeDetector({ formats });
     } catch { detector = null; }
   }
+  // Jika BarcodeDetector tidak mendukung QR, siapkan decoder QR berbasis canvas.
+  // Ini penting untuk Firefox/Safari dan browser lain yang belum punya BarcodeDetector.
+  if (!detector || !('BarcodeDetector' in window)) {
+    try { qrDecoder = await loadQrDecoder(); } catch { qrDecoder = null; }
+  }
 
   return new Promise((resolve) => {
     const back = document.createElement('div');
     back.className = 'scan-back';
     back.innerHTML = `<video playsinline muted autoplay></video><div class="scan-frame" aria-hidden="true"><i></i></div>
-      <div class="scan-bar"><p id="shint" role="status">Arahkan kamera ke barcode</p>
+      <div class="scan-bar"><p id="shint" role="status">Arahkan kamera ke QR Code 2D</p>
         <form class="scan-manual" id="sman"><input id="scode" placeholder="atau ketik kode" autocomplete="off" aria-label="Ketik kode manual"><button class="btn small" type="submit">OK</button></form>
         <div class="scan-btns"><button class="btn" id="storch" hidden>Senter</button><button class="btn" id="sclose">${icon('x')}Tutup</button></div></div>`;
     document.body.appendChild(back);
@@ -41,6 +72,7 @@ export async function scanBarcode() {
 
     let done = false, timer = null, last = '', hits = 0;
     const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     function finish(value) {
       if (done) return;
@@ -79,13 +111,20 @@ export async function scanBarcode() {
             const r = await detector.detect(video);
             if (r.length) text = r[0].rawValue;
           } else {
-            // Baca area tengah (di dalam bingkai) agar cepat dan tidak terganggu latar.
+            // QR adalah kode 2D. Ambil seluruh frame kamera agar QR yang berada
+            // sedikit di luar tengah tetap dapat ditemukan. Batasi ukuran untuk menjaga FPS.
             const vw = video.videoWidth, vh = video.videoHeight;
-            const sw = Math.floor(vw * 0.9), sh = Math.floor(vh * 0.4);
+            const scale = Math.min(1, 960 / Math.max(vw, vh));
+            const sw = Math.max(1, Math.floor(vw * scale));
+            const sh = Math.max(1, Math.floor(vh * scale));
             canvas.width = sw; canvas.height = sh;
-            canvas.getContext('2d', { willReadFrequently: true }).drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, sw, sh);
-            const r = decodeCanvas(canvas);
-            if (r) text = r.text;
+            ctx.drawImage(video, 0, 0, vw, vh, 0, 0, sw, sh);
+
+            if (qrDecoder) {
+              const image = ctx.getImageData(0, 0, sw, sh);
+              const qr = qrDecoder(image.data, sw, sh, { inversionAttempts: 'attemptBoth' });
+              if (qr && qr.data) text = qr.data;
+            }
           }
         }
       } catch { /* frame gagal dibaca: coba lagi */ }
@@ -94,7 +133,7 @@ export async function scanBarcode() {
         if (detector || text === last) hits++; else { last = text; hits = 1; }
         if (detector || hits >= 2) { finish(text); return; }
       } else hits = 0;
-      timer = setTimeout(tick, detector ? 120 : 140);
+      timer = setTimeout(tick, detector ? 120 : 220);
     }
     timer = setTimeout(tick, 300);
   });
