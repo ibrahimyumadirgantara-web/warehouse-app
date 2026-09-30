@@ -4,10 +4,12 @@ import * as gh from './github.js';
 import * as sync from './sync.js';
 import * as store from './store.js';
 import { S } from './store.js';
-import { can, hashPassword } from './core.js';
+import { can, isAdmin, hashPassword } from './core.js';
 import { $, $$, esc, icon, logoSvg, modal, toast } from './ui.js';
 import { mountDashboard } from './dashboard.js';
 import { mountParts } from './parts.js';
+import { mountUsers } from './users.js';
+import { mountReport } from './report.js';
 
 const root = document.documentElement;
 const app = document.getElementById('app');
@@ -30,21 +32,16 @@ function applyLayout() {
 }
 addEventListener('resize', applyLayout);
 
-// ---------- Halaman tahap berikutnya ----------
-const stub = (title, text) => (el) => {
-  el.innerHTML = `<div class="stub"><div><h2>${esc(title)}</h2><p>${esc(text)}</p></div></div>`;
-  return null;
-};
 const VIEWS = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', perm: 'dashboard', mount: mountDashboard },
   parts: { label: 'Part & BOM', icon: 'box', perm: 'parts', mount: mountParts },
-  users: { label: 'User', icon: 'users', perm: 'users', mount: stub('User management', 'Kelola user dan hak akses hadir di Tahap 3.') },
-  report: { label: 'Riwayat', icon: 'history', perm: 'report', mount: stub('Riwayat aksi', 'Semua tambah/kurang stok sudah tercatat sejak sekarang. Tampilan laporannya hadir di Tahap 3.') },
+  users: { label: 'User', icon: 'users', admin: true, mount: mountUsers },
+  report: { label: 'Riwayat', icon: 'history', perm: 'report', mount: mountReport },
 };
 
 // ---------- Rangka utama ----------
 function renderShell() {
-  const items = Object.entries(VIEWS).filter(([, v]) => can(S.user, v.perm));
+  const items = Object.entries(VIEWS).filter(([, v]) => (v.admin ? isAdmin(S.user) : can(S.user, v.perm)));
   if (!items.length) { app.innerHTML = '<div class="stub"><div><h2>Tidak ada akses</h2><p>Akun ini belum diberi akses menu apa pun. Hubungi admin.</p></div></div>'; return; }
   if (!items.some(([k]) => k === current)) current = items[0][0];
   app.innerHTML = `<div id="shell">
@@ -216,8 +213,11 @@ async function boot() {
 
   sync.onStatus(renderSync);
   sync.setRemoteHandler(async () => {
+    const sig = () => JSON.stringify(S.user ? [S.user.role, S.user.perms] : null);
+    const before = sig();
     await store.loadLocal();
-    if (!S.user && $('#shell')) { showLogin('Sesi berakhir. Masuk kembali.'); return; }
+    if (!S.user && $('#shell')) { showLogin('Sesi berakhir atau akun dinonaktifkan. Masuk kembali.'); return; }
+    if (S.user && sig() !== before && $('#shell')) { renderShell(); return; } // hak akses diubah admin
     store.emit();
   });
 

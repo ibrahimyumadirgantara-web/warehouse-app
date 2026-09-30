@@ -27,8 +27,7 @@ export const uid = () =>
 export const codeOf = (p) => (p && p.rack ? `${String(p.rack).toUpperCase()}${p.col}${p.row}` : '');
 
 export function rackSize(r) {
-  // RACK_HEAD sekarang menjadi lebar panel label di sisi kiri rak.
-  return { w: RACK_HEAD + r.cols * CELL_W, h: r.rows * CELL_H };
+  return { w: r.cols * CELL_W, h: RACK_HEAD + r.rows * CELL_H };
 }
 export const snap = (v) => Math.round(v / GRID) * GRID;
 export const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
@@ -41,7 +40,7 @@ export function clampRack(r) {
 }
 
 export function findFreeSpot(racks, cols, rows) {
-  const w = RACK_HEAD + cols * CELL_W, h = rows * CELL_H, pad = 12;
+  const w = cols * CELL_W, h = RACK_HEAD + rows * CELL_H, pad = 12;
   for (let y = 20; y <= MAP_H - h; y += GRID * 2) {
     for (let x = 20; x <= MAP_W - w; x += GRID * 2) {
       const clash = racks.some((r) => {

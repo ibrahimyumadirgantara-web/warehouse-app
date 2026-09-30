@@ -1,7 +1,8 @@
 // forms.js — dialog bersama: ubah stok dan tambah/edit/hapus part (dipakai Dashboard dan Part & BOM).
 import { S, adjustStock, savePart, deletePart } from './store.js';
 import { codeOf, can, isAdmin } from './core.js';
-import { esc, modal, toast, confirmDialog } from './ui.js';
+import { esc, icon, modal, toast, confirmDialog } from './ui.js';
+import { scanBarcode } from './scanner.js';
 
 const opts = (n, sel) => Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === sel ? ' selected' : ''}>${i + 1}</option>`).join('');
 
@@ -56,14 +57,14 @@ export function openStock(no) {
 }
 
 // part = null → part baru. onSaved(no, isNew) dipanggil setelah tersimpan.
-export function openPartForm(part, { onSaved } = {}) {
+export function openPartForm(part, { onSaved, preset } = {}) {
   if (!S.racks.length) { toast('Buat rak dulu: Dashboard → Atur rak → Rak baru.', 'warn'); return; }
   const isNew = !part;
-  const p = part || { no: '', name: '', spec: '', qty: 0, rack: S.racks[0].id, col: 1, row: 1 };
+  const p = part || { no: (preset && preset.no) || '', name: '', spec: '', qty: 0, rack: S.racks[0].id, col: 1, row: 1 };
   const m = modal({
     title: isNew ? 'Part baru' : 'Edit part',
     body: `<form class="form" id="pf" novalidate>
-      <label>No item<input name="no" value="${esc(p.no)}" ${isNew ? '' : 'readonly'} autocomplete="off"></label>
+      <label>No item<span class="inrow"><input name="no" value="${esc(p.no)}" ${isNew ? '' : 'readonly'} autocomplete="off">${isNew ? `<button type="button" class="icon-btn" id="scanno" aria-label="Pindai barcode no item">${icon('camera')}</button>` : ''}</span></label>
       <label>Nama part<input name="name" value="${esc(p.name)}" autocomplete="off"></label>
       <label>Spesifikasi<input name="spec" value="${esc(p.spec || '')}" autocomplete="off"></label>
       ${isNew ? `<label>Qty awal<input name="qty" type="number" inputmode="numeric" min="0" step="1" value="${p.qty}"></label>` : ''}
@@ -83,6 +84,8 @@ export function openPartForm(part, { onSaved } = {}) {
     code();
   }
   dims(p.col, p.row);
+  const scanBtn = m.$('#scanno');
+  if (scanBtn) scanBtn.onclick = async () => { const c = await scanBarcode(); if (c) { el('no').value = c; el('name').focus(); } };
   el('rack').addEventListener('change', () => dims(1, 1));
   el('col').addEventListener('change', code); el('row').addEventListener('change', code);
   async function save() {

@@ -88,3 +88,13 @@ export async function writeFile(path, items, sha, message) {
   if (!res.ok) throw await fail(res);
   return { sha: (await res.json()).content.sha };
 }
+
+// Nama file di sebuah folder repo ([] bila folder belum ada).
+export async function listDir(path) {
+  const c = cfg.get();
+  const res = await gh(`${base(c)}/contents/${path}?ref=${encodeURIComponent(c.branch || 'main')}`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw await fail(res);
+  const j = await res.json();
+  return Array.isArray(j) ? j.map((x) => x.name) : [];
+}

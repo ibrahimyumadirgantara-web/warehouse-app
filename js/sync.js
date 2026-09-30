@@ -1,7 +1,7 @@
 // sync.js — antrean aksi → commit ke GitHub, plus penarikan data terbaru.
 import * as db from './db.js';
 import * as gh from './github.js';
-import { PATHS, targetsOf, kindOfPath, applyOp, defaultRacks, makeUser, ADMIN_PERMS } from './core.js';
+import { PATHS, targetsOf, kindOfPath, applyOp, defaultRacks, makeUser, ADMIN_PERMS, historyPath } from './core.js';
 
 export const state = { status: 'idle', pending: 0, error: '' };
 const listeners = new Set();
@@ -129,6 +129,35 @@ export async function ensureSeed() {
     }
     await db.setMeta('seed:' + path, 1);
   }
+}
+
+// ---------- Riwayat (dibaca dari GitHub per bulan, di-cache untuk offline) ----------
+export async function historyMonths() {
+  try {
+    const names = await gh.listDir('data');
+    const months = names.map((n) => (/^history-(\d{4}-\d{2})\.json$/.exec(n) || [])[1]).filter(Boolean);
+    await db.setMeta('hist:months', months);
+    return months;
+  } catch { return db.getMeta('hist:months', []); }
+}
+
+// Hasil: { items, error, offline } — sudah digabung dengan aksi lokal yang belum terkirim.
+export async function loadHistory(month) {
+  const path = historyPath(month + '-01');
+  const key = 'hist:' + month;
+  const cached = await db.getMeta(key, null);
+  let items = cached ? cached.items : [], error = '', offline = false;
+  try {
+    const r = await gh.readFile(path, cached && cached.etag);
+    if (r.items) { items = r.items; await db.setMeta(key, { etag: r.etag, items }); }
+    else if (r.missing) items = [];
+  } catch (e) { error = e.message; offline = e.status === 0; }
+  const seen = new Set(items.map((h) => h.id));
+  for (const o of await db.getAll('queue')) {
+    const h = o.history;
+    if (h && h.ts.slice(0, 7) === month && !o.done.includes(path) && !seen.has(h.id)) { items = items.concat(h); seen.add(h.id); }
+  }
+  return { items, error, offline };
 }
 
 // ---------- Otomatis ----------

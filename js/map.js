@@ -17,22 +17,14 @@ export function createMap(host, opts) {
     const { w, h } = rackSize(r);
     const hasHit = [...hits].some((c) => c.charAt(0) === r.id);
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
-    s += `<rect class="rack-body" x="0" y="0" width="${w}" height="${h}" rx="6"/>`;
-    s += `<rect class="rack-head" width="${RACK_HEAD}" height="${h}" rx="6"/>`;
-    // Label rak disusun vertikal di dalam kolom label: R / A / K / A
-    const lx = RACK_HEAD / 2;
-    const ly = h / 2 - 21;
-    s += `<text class="rack-label" x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" style="letter-spacing:0; word-spacing:4px;">`;
-    s += `<tspan x="${lx}" dy="0">R</tspan>`;
-    s += `<tspan x="${lx}" dy="16">A</tspan>`;
-    s += `<tspan x="${lx}" dy="16">K</tspan>`;
-    s += `<tspan x="${lx}" dy="16">${esc(r.id)}</tspan>`;
-    s += `</text>`;
+    s += `<rect class="rack-body" width="${w}" height="${h}" rx="6"/>`;
+    s += `<rect class="rack-head" width="${w}" height="${RACK_HEAD}" rx="6"/>`;
+    s += `<text class="rack-label" x="${w / 2}" y="${RACK_HEAD / 2}">Rak ${esc(r.id)}</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
         const code = `${r.id}${col}${row}`;
-        const x = RACK_HEAD + (col - 1) * CELL_W;
-        const y = (ROW1_ON_TOP ? row - 1 : r.rows - row) * CELL_H;
+        const x = (col - 1) * CELL_W;
+        const y = RACK_HEAD + (ROW1_ON_TOP ? row - 1 : r.rows - row) * CELL_H;
         const hit = hits.has(code);
         s += `<g class="cell${occ.has(code) ? ' occ' : ''}${hit ? ' hit' : ''}" data-code="${code}">` +
           `<rect x="${x + 2}" y="${y + 2}" width="${CELL_W - 4}" height="${CELL_H - 4}" rx="4"/>` +

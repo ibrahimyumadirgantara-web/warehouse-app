@@ -5,6 +5,7 @@ import { matchParts } from './search.js';
 import { $, esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { createMap } from './map.js';
 import { openStock, openPartForm } from './forms.js';
+import { scanBarcode } from './scanner.js';
 
 const byNo = (a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true });
 const opts = (n, sel) => Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === sel ? ' selected' : ''}>${i + 1}</option>`).join('');
@@ -17,6 +18,7 @@ export function mountDashboard(root) {
     <div class="panel searchbar">${icon('search')}
       <input id="q" type="search" placeholder="Cari no item, nama, atau lokasi (mis. A13)" autocomplete="off" enterkeyhint="search" aria-label="Cari part">
       <button class="icon-btn" id="qclear" aria-label="Hapus pencarian" hidden>${icon('x')}</button>
+      <button class="icon-btn" id="scan" aria-label="Pindai barcode dengan kamera">${icon('camera')}</button>
     </div>
     <div class="split">
       <div class="panel map-panel">
@@ -72,7 +74,8 @@ export function mountDashboard(root) {
     if (!S.parts.length) {
       list.innerHTML = `<li class="empty"><b>Belum ada part</b><span>${canStock ? 'Ketuk “Part baru” untuk menambahkan part pertama.' : 'Minta admin menambahkan part.'}</span></li>`;
     } else if (!res.length) {
-      list.innerHTML = `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama part, atau kode lokasi seperti A13.</span></li>`;
+      list.innerHTML = `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama part, atau kode lokasi seperti A13.</span>
+        ${canStock ? '<button class="btn small" id="addq" style="align-self:flex-start;margin-top:6px">Tambah part dengan no item ini</button>' : ''}</li>`;
     } else {
       list.innerHTML = res.slice(0, shown).map(row).join('') +
         (res.length > shown ? `<li class="more"><button class="btn small" id="more">Tampilkan ${res.length - shown} lagi</button></li>` : '');
@@ -95,6 +98,16 @@ export function mountDashboard(root) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
   $('#qclear', root).onclick = () => { q = ''; input.value = ''; selected = null; refresh(); input.focus(); };
 
+  $('#scan', root).onclick = async () => {
+    const code = await scanBarcode();
+    if (!code) return;
+    q = code; input.value = code; shown = 200;
+    const exact = S.parts.find((p) => String(p.no).toLowerCase() === code.toLowerCase());
+    selected = exact ? exact.no : null;
+    refresh();
+    if (!exact && !matchParts(S.parts, code).length) toast(`Kode ${code} tidak ditemukan.`, 'warn');
+  };
+
   function pick(li) {
     const no = li.dataset.no;
     selected = selected === no ? null : no;
@@ -102,6 +115,7 @@ export function mountDashboard(root) {
   }
   list.addEventListener('click', (e) => {
     if (e.target.closest('#more')) { shown += 200; renderList(); return; }
+    if (e.target.closest('#addq')) { openPartForm(null, { preset: { no: q }, onSaved: (no) => { q = no; input.value = no; selected = no; refresh(); } }); return; }
     const li = e.target.closest('.row');
     if (!li) return;
     if (e.target.closest('[data-act=stock]')) openStock(li.dataset.no); else pick(li);
