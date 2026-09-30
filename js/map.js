@@ -19,7 +19,7 @@ export function createMap(host, opts) {
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
     s += `<rect class="rack-body" width="${w}" height="${h}" rx="6"/>`;
     s += `<rect class="rack-head" width="${w}" height="${RACK_HEAD}" rx="6"/>`;
-    s += `<text class="rack-label" x="${w / 2}" y="${RACK_HEAD / 2 + 5}">Rak ${esc(r.id)}</text>`;
+    s += `<text class="rack-label" x="${w / 2}" y="${RACK_HEAD / 2}">Rak ${esc(r.id)}</text>`;
     for (let row = 1; row <= r.rows; row++) {
       for (let col = 1; col <= r.cols; col++) {
         const code = `${r.id}${col}${row}`;
@@ -28,7 +28,7 @@ export function createMap(host, opts) {
         const hit = hits.has(code);
         s += `<g class="cell${occ.has(code) ? ' occ' : ''}${hit ? ' hit' : ''}" data-code="${code}">` +
           `<rect x="${x + 2}" y="${y + 2}" width="${CELL_W - 4}" height="${CELL_H - 4}" rx="4"/>` +
-          (hit ? `<text x="${x + CELL_W / 2}" y="${y + CELL_H / 2 + 6}">${code}</text>` : '') + `</g>`;
+          (hit ? `<text x="${x + CELL_W / 2}" y="${y + CELL_H / 2}">${code}</text>` : '') + `</g>`;
       }
     }
     return s + '</g>';

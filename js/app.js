@@ -7,6 +7,7 @@ import { S } from './store.js';
 import { can, hashPassword } from './core.js';
 import { $, $$, esc, icon, logoSvg, modal, toast } from './ui.js';
 import { mountDashboard } from './dashboard.js';
+import { mountParts } from './parts.js';
 
 const root = document.documentElement;
 const app = document.getElementById('app');
@@ -36,7 +37,7 @@ const stub = (title, text) => (el) => {
 };
 const VIEWS = {
   dashboard: { label: 'Dashboard', icon: 'dashboard', perm: 'dashboard', mount: mountDashboard },
-  parts: { label: 'Part & BOM', icon: 'box', perm: 'parts', mount: stub('Part & BOM', 'Import/export Excel untuk Part dan BOM hadir di Tahap 2.') },
+  parts: { label: 'Part & BOM', icon: 'box', perm: 'parts', mount: mountParts },
   users: { label: 'User', icon: 'users', perm: 'users', mount: stub('User management', 'Kelola user dan hak akses hadir di Tahap 3.') },
   report: { label: 'Riwayat', icon: 'history', perm: 'report', mount: stub('Riwayat aksi', 'Semua tambah/kurang stok sudah tercatat sejak sekarang. Tampilan laporannya hadir di Tahap 3.') },
 };
@@ -156,6 +157,7 @@ function enter(u) {
   localStorage.setItem(SESSION, JSON.stringify({ u: u.username, t: Date.now() }));
   renderShell();
   sync.startAuto();
+  sync.ensureSeed().then(() => sync.pull()).catch(() => {}); // repo lama: buat data/bom.json bila belum ada
   if (u.mustChange) passwordModal(true);
 }
 

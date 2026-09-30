@@ -16,6 +16,9 @@ const P = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   swap: '<path d="M7 4v14M3.5 14.5 7 18l3.5-3.5M17 20V6M13.5 9.5 17 6l3.5 3.5"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
+  download: '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   move: '<path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
 };
 export const icon = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
@@ -33,10 +36,10 @@ export function toast(msg, type = 'info') {
   setTimeout(() => t.remove(), type === 'error' ? 5000 : 2800);
 }
 
-export function modal({ title, body, footer = '', dismissible = true, onClose, onOpen }) {
+export function modal({ title, body, footer = '', dismissible = true, wide = false, onClose, onOpen }) {
   const back = document.createElement('div');
   back.className = 'modal-back';
-  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+  back.innerHTML = `<div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <header><h2>${esc(title)}</h2>${dismissible ? `<button class="icon-btn" data-close aria-label="Tutup">${icon('x')}</button>` : ''}</header>
     <div class="modal-body">${body}</div>${footer ? `<footer>${footer}</footer>` : ''}</div>`;
   const prev = document.activeElement;
@@ -69,3 +72,17 @@ export function confirmDialog(message, okLabel = 'Lanjutkan', danger = false) {
     m.$('#ok').onclick = () => { resolve(true); m.close(); };
   });
 }
+
+// Buka pemilih file; resolve(null) bila dibatalkan.
+export function pickFile(accept) {
+  return new Promise((resolve) => {
+    const i = document.createElement('input');
+    i.type = 'file'; i.accept = accept; i.style.display = 'none';
+    document.body.appendChild(i);
+    i.addEventListener('change', () => { resolve(i.files[0] || null); i.remove(); });
+    i.addEventListener('cancel', () => { resolve(null); i.remove(); });
+    i.click();
+  });
+}
+export const today = () => new Date().toISOString().slice(0, 10);
+export const safeName = (s) => String(s).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'file';

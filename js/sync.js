@@ -13,7 +13,7 @@ export async function refreshPending() { state.pending = (await db.getAll('queue
 let remoteHandler = null;
 export const setRemoteHandler = (fn) => { remoteHandler = fn; };
 
-const PULL = { parts: PATHS.parts, racks: PATHS.racks, users: PATHS.users };
+const PULL = { parts: PATHS.parts, racks: PATHS.racks, users: PATHS.users, bom: PATHS.bom };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- Antrean ----------
@@ -114,16 +114,20 @@ export async function ensureSeed() {
   const seeds = {
     [PATHS.parts]: async () => [],
     [PATHS.racks]: async () => defaultRacks(),
+    [PATHS.bom]: async () => [],
     [PATHS.users]: async () => [await makeUser({
       username: 'admin', name: 'Administrator', role: 'admin',
       password: 'admin123', perms: { ...ADMIN_PERMS }, mustChange: true,
     })],
   };
   for (const [path, make] of Object.entries(seeds)) {
+    if (await db.getMeta('seed:' + path)) continue; // sudah dicek di perangkat ini
     const r = await gh.readFile(path);
-    if (!r.missing) continue;
-    try { await gh.writeFile(path, await make(), null, `Inisialisasi ${path}`); }
-    catch (e) { if (e.status !== 409) throw e; }
+    if (r.missing) {
+      try { await gh.writeFile(path, await make(), null, `Inisialisasi ${path}`); }
+      catch (e) { if (e.status !== 409) throw e; }
+    }
+    await db.setMeta('seed:' + path, 1);
   }
 }
 
