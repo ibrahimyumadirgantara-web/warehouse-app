@@ -17,7 +17,7 @@ export function createMap(host, opts) {
     const { w, h } = rackSize(r);
     const hasHit = [...hits].some((c) => c.charAt(0) === r.id);
     let s = `<g class="rack${hasHit ? ' has-hit' : ''}" data-id="${esc(r.id)}" transform="translate(${r.x} ${r.y})">`;
-    s += `<rect class="rack-body" x="${RACK_HEAD}" width="${w - RACK_HEAD}" height="${h}" rx="6"/>`;
+    s += `<rect class="rack-body" x="0" y="0" width="${w}" height="${h}" rx="6"/>`;
     s += `<rect class="rack-head" width="${RACK_HEAD}" height="${h}" rx="6"/>`;
     s += `<text class="rack-label" x="${RACK_HEAD / 2}" y="${h / 2}" transform="rotate(-90 ${RACK_HEAD / 2} ${h / 2})">Rak ${esc(r.id)}</text>`;
     for (let row = 1; row <= r.rows; row++) {
