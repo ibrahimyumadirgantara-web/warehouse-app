@@ -1,5 +1,5 @@
 // Service worker: jaringan dulu, cache sebagai cadangan (aplikasi tetap terbuka saat offline).
-const V = 'swl-v5';
+const V = 'swl-v6';
 const SHELL = ['./', 'index.html', 'manifest.json', 'css/themes.css', 'css/main.css',
   'js/app.js', 'js/core.js', 'js/db.js', 'js/github.js', 'js/sync.js', 'js/store.js',
   'js/ui.js', 'js/map.js', 'js/dashboard.js', 'js/search.js', 'js/forms.js', 'js/parts.js', 'js/bom.js',
@@ -15,22 +15,7 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   const u = new URL(e.request.url);
-  if (e.request.method !== 'GET') return;
-
-  // jsQR dimuat dari CDN hanya saat diperlukan. Simpan responsnya setelah
-  // pemakaian pertama agar scanner QR tetap dapat dipakai saat offline berikutnya.
-  const isQrCdn = u.hostname === 'cdn.jsdelivr.net' || u.hostname === 'unpkg.com';
-  if (isQrCdn && /(?:^|\/)jsqr@1\.4\.0\//i.test(u.pathname)) {
-    e.respondWith(
-      caches.match(e.request).then((cached) => cached || fetch(e.request).then((r) => {
-        if (r.ok) { const copy = r.clone(); caches.open(V).then((c) => c.put(e.request, copy)); }
-        return r;
-      }))
-    );
-    return;
-  }
-
-  if (u.origin !== location.origin) return; // API GitHub tidak di-cache
+  if (e.request.method !== 'GET' || u.origin !== location.origin) return; // API GitHub tidak di-cache
   e.respondWith(
     fetch(e.request)
       .then((r) => { if (r.ok) { const copy = r.clone(); caches.open(V).then((c) => c.put(e.request, copy)); } return r; })
