@@ -227,6 +227,52 @@ button{cursor:pointer}
 .scan-bar .btn{background:#fff;color:#111;border-color:#fff}
 .scan-bar .btn:hover{border-color:var(--hit)}
 
+/* ---------- Tahap 4: BOM di pencarian, stok rendah, opname ---------- */
+.qty.low{color:var(--warn)}
+.qmin{display:block;font:500 11px var(--font);color:var(--ink-2)}
+.nbadge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--danger);color:#fff;font:700 11px/18px var(--font);text-align:center;font-style:normal}
+.nav button{position:relative}
+[data-layout=mobile] .nbadge{position:absolute;top:4px;left:calc(50% + 6px)}
+.seclabel{padding:6px 14px;font-size:12px;font-weight:700;color:var(--ink-2);background:var(--panel-2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:1}
+.prodhit{grid-template-columns:minmax(0,1fr) auto auto auto}
+.ptag{padding:2px 9px;border-radius:12px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent)}
+.chev{font-size:22px;color:var(--ink-2);padding:0 6px}
+.bomhead{padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;flex-direction:column;gap:8px;position:sticky;top:0;z-index:2}
+.bh-top{display:flex;align-items:center;gap:10px}.bh-title{display:flex;flex-direction:column;min-width:0}.bh-title b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bh-ctl{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.bh-units{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.ustep{display:grid;grid-template-columns:38px 64px 38px;gap:4px}
+.ustep button{border:1px solid var(--line);background:var(--panel);border-radius:8px;font-size:20px;font-weight:700;height:40px}
+.ustep input{height:40px;text-align:center;border:1px solid var(--line);border-radius:8px;background:var(--panel);font:700 17px var(--mono);color:var(--ink);min-width:0}
+.bh-ctl .btn.primary{flex:1;min-width:150px}
+.bh-note{margin:0;font-size:13px}
+.split.bommode{grid-template-columns:minmax(0,5fr) minmax(0,5fr)}
+.split.bommode #addpart{display:none}
+[data-layout=mobile] .split.bommode{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,28fr) minmax(0,72fr)}
+[data-layout=mobile] .bomhead{padding:8px 10px;gap:6px}
+[data-layout=mobile] .bh-ctl{flex-wrap:nowrap;gap:8px}
+[data-layout=mobile] .bh-ctl .btn.primary{min-width:0;padding:0 8px;font-size:13px;line-height:1.15}
+[data-layout=mobile] .bh-top .btn{white-space:nowrap}
+.bcap{display:grid;grid-template-columns:minmax(0,1fr) auto auto 40px;gap:8px;padding:5px 6px 5px 14px;font-size:12px;font-weight:700;color:var(--ink-2);border-bottom:1px solid var(--line)}
+.brow.short{background:color-mix(in srgb,var(--danger) 9%,transparent)}
+.map-panel .map-hint{max-width:70%}
+.split.bommode .map-panel::after{content:"Lokasi part produk ditandai";position:absolute;left:10px;bottom:8px;padding:3px 10px;border-radius:6px;background:var(--panel);border:1px solid var(--line);font-size:12px;color:var(--ink-2);pointer-events:none}
+.osheet-head{position:sticky;top:0;z-index:2;display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--panel-2);border-bottom:1px solid var(--line)}
+.oh-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.oh-title{display:flex;flex-direction:column}
+.oh-acts .btn{flex:0 1 auto}.oh-acts .btn.primary{margin-left:auto}
+.orow{display:grid;grid-template-columns:minmax(0,1fr) 60px 56px 110px;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line)}
+.orow.thead{position:static;background:var(--panel-2);font-size:13px;font-weight:700;color:var(--ink-2)}
+.orow .r{text-align:right}.oname{display:flex;flex-direction:column;min-width:0}.oname b,.oname span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ocell{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.ocount{width:70px;height:40px;text-align:right;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font:700 16px var(--mono);color:var(--ink)}
+.ocount:focus{border-color:var(--accent);outline:0}
+.odiff{font:700 13px var(--mono);min-width:26px;text-align:right}
+.orow.diff .ocount{border-color:var(--warn)}.orow.same .ocount{border-color:var(--ok)}.orow.bad .ocount{border-color:var(--danger)}.orow.bad .odiff{color:var(--danger)}
+[data-layout=mobile] .orow{grid-template-columns:minmax(0,1fr) 46px 96px}
+[data-layout=mobile] .orow>:nth-child(3){display:none}
+[data-layout=mobile] .orow.thead{display:none}
+.btn.danger:disabled{opacity:.5}
+
 /* ---------- Login / setup ---------- */
 .auth{min-height:100dvh;display:grid;place-items:center;padding:16px;overflow:auto}
 .auth-card{width:min(420px,100%);padding:24px;display:flex;flex-direction:column;gap:14px}

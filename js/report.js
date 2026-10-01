@@ -8,14 +8,16 @@ const LABEL = {
   stock_in: ['Stok masuk', 'in'], stock_out: ['Stok keluar', 'out'], part_add: ['Part baru', 'chg'], part_edit: ['Ubah part', 'chg'],
   part_delete: ['Hapus part', 'out'], import_parts: ['Impor part', 'chg'], bom_import: ['Impor BOM', 'chg'], bom_delete: ['Hapus BOM', 'out'],
   rack_add: ['Rak baru', 'chg'], rack_move: ['Geser rak', 'chg'], rack_edit: ['Ubah rak', 'chg'], rack_delete: ['Hapus rak', 'out'],
+  bom_use: ['Produksi (BOM)', 'out'], opname_adjust: ['Opname: selisih', 'chg'], opname_done: ['Opname selesai', 'chg'],
   user_add: ['User baru', 'chg'], user_edit: ['Ubah user', 'chg'], user_password: ['Ganti password', 'chg'], user_reset: ['Reset password', 'chg'],
 };
-const GROUPS = [['', 'Semua aksi'], ['stock', 'Stok masuk/keluar'], ['part', 'Part & impor'], ['bom', 'BOM'], ['rack', 'Rak'], ['user', 'User']];
+const GROUPS = [['', 'Semua aksi'], ['stock', 'Stok masuk/keluar'], ['part', 'Part & impor'], ['bom', 'BOM'], ['opname', 'Opname'], ['rack', 'Rak'], ['user', 'User']];
 const inGroup = (a, g) => !g || (g === 'stock' ? a.startsWith('stock_') : g === 'part' ? a.startsWith('part_') || a === 'import_parts' : a.startsWith(g + '_'));
 const monthNow = () => new Date().toISOString().slice(0, 7);
 const fmt = (ts) => new Date(ts).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const userName = (u) => (S.users.find((x) => x.username === u) || {}).name || u;
-const change = (h) => (h.action === 'stock_in' || h.action === 'stock_out' ? `${h.delta > 0 ? '+' : ''}${h.delta}` : h.note || '');
+const isQty = (a) => a === 'stock_in' || a === 'stock_out' || a === 'bom_use' || a === 'opname_adjust';
+const change = (h) => (isQty(h.action) ? `${h.delta > 0 ? '+' : ''}${h.delta}` : h.note || '');
 
 export function mountReport(root) {
   let month = monthNow(), months = [], data = { items: [], error: '', offline: false }, f = { user: '', group: '', q: '' }, loading = false, alive = true;
@@ -50,7 +52,7 @@ export function mountReport(root) {
     if (loading) { body.innerHTML = '<div class="empty"><span>Memuat riwayat…</span></div>'; return; }
     const list = filtered();
     const inn = list.filter((h) => h.action === 'stock_in').reduce((s, h) => s + h.delta, 0);
-    const out = list.filter((h) => h.action === 'stock_out').reduce((s, h) => s - h.delta, 0);
+    const out = list.filter((h) => h.action === 'stock_out' || h.action === 'bom_use').reduce((s, h) => s - h.delta, 0);
     const notice = data.error ? `<div class="notice">${data.offline ? 'Offline — menampilkan data tersimpan terakhir.' : esc(data.error)}</div>` : '';
     if (!list.length) { body.innerHTML = `${notice}<div class="empty"><b>Tidak ada aksi</b><span>${data.items.length ? 'Tidak ada yang cocok dengan filter.' : 'Belum ada aksi tercatat pada bulan ini.'}</span></div>`; return; }
     body.innerHTML = `${notice}<div class="tcount" aria-live="polite">${list.length} aksi · <span class="okc">masuk ${inn}</span> · <span class="badc">keluar ${out}</span></div>
@@ -81,7 +83,7 @@ export function mountReport(root) {
     if (!list.length) return toast('Tidak ada data untuk diekspor.', 'warn');
     const H = ['Waktu', 'User', 'Aksi', 'No Item', 'Nama', 'Perubahan', 'Stok Akhir', 'Lokasi', 'Catatan'].map((v) => ({ v, s: 'h' }));
     const rows = list.map((h) => [new Date(h.ts).toLocaleString('id-ID', { hour12: false }), userName(h.by), (LABEL[h.action] || [h.action])[0], h.no || '', h.name || '',
-      h.action.startsWith('stock_') ? h.delta : '', h.after ?? '', h.loc || '', h.note || '']);
+      isQty(h.action) ? h.delta : '', h.after ?? '', h.loc || '', h.note || '']);
     downloadBytes(writeWorkbook([{ name: 'Riwayat', freeze: 1, widths: [20, 22, 16, 18, 30, 12, 12, 10, 40], rows: [H, ...rows] }]), `riwayat-${month}.xlsx`);
   };
 

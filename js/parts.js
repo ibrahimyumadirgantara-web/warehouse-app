@@ -1,12 +1,13 @@
 // parts.js — menu "Part & BOM": tab Part (daftar, impor/ekspor Excel) dan tab BOM.
 import { S, onChange, importParts } from './store.js';
-import { can, isAdmin } from './core.js';
+import { can, isAdmin, isLow, minOf, lowParts } from './core.js';
 import { matchParts } from './search.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parsePartSheets, partsToSheet, partTemplate } from './sheets.js';
 import { $, esc, icon, modal, toast, pickFile, today } from './ui.js';
 import { openStock } from './forms.js';
 import { bomTab } from './bom.js';
+import { opnameTab } from './opname.js';
 
 const byNo = (a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true });
 
@@ -16,15 +17,22 @@ export function errorList(errors, max = 8) {
 }
 
 function partTab(acts, body) {
-  let filter = '', shown = 300;
+  let filter = '', shown = 300, lowOnly = false;
   const canEdit = can(S.user, 'stock');
   acts.innerHTML = `<div class="filter">${icon('search')}<input id="pfilter" type="search" placeholder="Filter part…" aria-label="Filter part" autocomplete="off"></div>
     ${canEdit ? `<button class="btn small" id="imp">${icon('upload')}Impor Excel</button>` : ''}
+    <button class="btn small" id="lowf" aria-pressed="false"></button>
     <button class="btn small" id="exp">${icon('download')}Ekspor</button>
     ${canEdit ? `<button class="btn small" id="tpl">${icon('file')}Template</button>` : ''}`;
 
   function render() {
-    const list = filter ? matchParts(S.parts, filter) : S.parts.slice().sort(byNo);
+    const nLow = lowParts(S.parts).length, lb = acts.querySelector('#lowf');
+    lb.textContent = `Stok rendah (${nLow})`;
+    lb.hidden = !nLow && !lowOnly;
+    lb.classList.toggle('primary', lowOnly);
+    lb.setAttribute('aria-pressed', lowOnly);
+    let list = filter ? matchParts(S.parts, filter) : S.parts.slice().sort(byNo);
+    if (lowOnly) list = list.filter(isLow);
     if (!S.parts.length) {
       body.innerHTML = `<div class="empty"><b>Belum ada part</b><span>${canEdit ? 'Unduh Template, isi datanya, lalu ketuk Impor Excel. Atau tambahkan satu per satu dari Dashboard.' : 'Minta admin mengisi data part.'}</span></div>`;
       return;
@@ -36,11 +44,12 @@ function partTab(acts, body) {
         return `<div class="trow${canEdit ? ' click' : ''}" data-no="${esc(p.no)}"${canEdit ? ' tabindex="0" role="button"' : ''}>
           <span class="mono">${esc(p.no)}</span><span class="tname">${esc(p.name)}</span><span class="hide-m muted tname">${esc(p.spec || '')}</span>
           <span>${p.rack ? `<span class="loc">${esc(p.rack)}${p.col}${p.row}</span>` : '<span class="muted">–</span>'}</span>
-          <span class="qty r${q <= 0 ? ' zero' : ''}">${q}</span></div>`;
+          <span class="qty r${q <= 0 ? ' zero' : isLow(p) ? ' low' : ''}"${isLow(p) ? ` title="Stok minimum ${minOf(p)}"` : ''}>${q}${minOf(p) ? `<small class="qmin">min ${minOf(p)}</small>` : ''}</span></div>`;
       }).join('')}
       ${list.length > shown ? `<div class="more"><button class="btn small" id="more">Tampilkan ${list.length - shown} lagi</button></div>` : ''}</div>`;
   }
 
+  acts.querySelector('#lowf').onclick = () => { lowOnly = !lowOnly; shown = 300; render(); };
   acts.querySelector('#pfilter').addEventListener('input', (e) => { filter = e.target.value.trim(); shown = 300; render(); });
   body.addEventListener('click', (e) => {
     if (e.target.closest('#more')) { shown += 300; render(); return; }
@@ -102,10 +111,11 @@ function partTab(acts, body) {
 }
 
 export function mountParts(root) {
-  let tab = localStorage.getItem('swl.ptab') === 'bom' ? 'bom' : 'part', api = null;
+  const TABS = { part: partTab, bom: bomTab, opname: opnameTab };
+  let tab = TABS[localStorage.getItem('swl.ptab')] ? localStorage.getItem('swl.ptab') : 'part', api = null;
   root.innerHTML = `<section class="pv">
     <div class="pv-top"><div class="segset tabs" role="tablist">
-      <button data-t="part" role="tab">Part</button><button data-t="bom" role="tab">BOM</button></div>
+      <button data-t="part" role="tab">Part</button><button data-t="bom" role="tab">BOM</button><button data-t="opname" role="tab">Opname</button></div>
       <div class="pv-acts" id="acts"></div></div>
     <div class="pv-body panel" id="pvbody"></div></section>`;
   const acts = $('#acts', root);
@@ -118,7 +128,7 @@ export function mountParts(root) {
     const cur = $('#pvbody', root);
     const fresh = cur.cloneNode(false); // elemen baru → listener tab sebelumnya ikut hilang
     cur.replaceWith(fresh);
-    api = (t === 'bom' ? bomTab : partTab)(acts, fresh);
+    api = TABS[t](acts, fresh);
   }
   root.querySelectorAll('[data-t]').forEach((b) => b.addEventListener('click', () => show(b.dataset.t)));
   const off = onChange(() => api && api.refresh());

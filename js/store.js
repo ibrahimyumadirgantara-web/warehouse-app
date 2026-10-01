@@ -1,7 +1,7 @@
 // store.js — state aplikasi + aksi. Perubahan langsung terlihat (lokal), lalu masuk antrean sync.
 import * as db from './db.js';
 import * as sync from './sync.js';
-import { applyOp, uid, codeOf, clampRack, hashPassword, randomSalt, makeUser } from './core.js';
+import { applyOp, uid, codeOf, clampRack, hashPassword, randomSalt, makeUser, bomCheck } from './core.js';
 
 export const S = { parts: [], racks: [], users: [], bom: [], user: null };
 const subs = new Set();
@@ -34,7 +34,11 @@ async function commit(op) {
     if (op.newParts && op.newParts.length) await db.replaceAll('parts', S.parts);
   } else if (t === 'part.import') await db.replaceAll('parts', S.parts);
   else if (t === 'part.delete') await db.del('parts', op.no);
-  else {
+  else if (t === 'stock.batch') {
+    if (op.adjusts.length > 20) await db.replaceAll('parts', S.parts);
+    else for (const a of op.adjusts) { const rec = S.parts.find((p) => p.no === a.no); if (rec) await db.put('parts', rec); }
+    if (op.rackOpname) { const r = S.racks.find((x) => x.id === op.rackOpname.id); if (r) await db.put('racks', r); }
+  } else {
     const rec = S.parts.find((p) => p.no === (op.part ? op.part.no : op.no));
     if (rec) await db.put('parts', rec);
   }
@@ -44,18 +48,22 @@ async function commit(op) {
   emit();
 }
 
+// Part yang baru jatuh ke/di bawah stok minimum akibat perubahan ini (sebelumnya masih di atas).
+const crossedLow = (p, before, after) => (Number(p.min) > 0 && before > Number(p.min) && after <= Number(p.min) ? [{ no: p.no, name: p.name, qty: after, min: Number(p.min) }] : []);
+
 export async function adjustStock(no, delta, note = '') {
   const p = S.parts.find((x) => x.no === no);
   if (!p) return { ok: false, error: 'Part tidak ditemukan.' };
   if (!Number.isInteger(delta) || delta === 0) return { ok: false, error: 'Jumlah harus bilangan bulat.' };
-  const after = (Number(p.qty) || 0) + delta;
+  const before = Number(p.qty) || 0, after = before + delta;
   if (after < 0) return { ok: false, error: 'Stok tidak cukup.' };
+  const low = crossedLow(p, before, after);
   await commit({
     type: 'stock.adjust', no, delta,
     msg: `Stok ${no} ${delta > 0 ? '+' : ''}${delta}`,
     history: H(delta > 0 ? 'stock_in' : 'stock_out', { no, name: p.name, delta, after, loc: codeOf(p), note }),
   });
-  return { ok: true, after };
+  return { ok: true, after, low };
 }
 
 export async function savePart(part, isNew) {
@@ -182,4 +190,52 @@ export async function resetPassword(username, password) {
     history: H('user_reset', { no: username, name: (S.users.find((u) => u.username === username) || {}).name || username }),
   });
   return { ok: true };
+}
+
+// ---------- Tahap 4: potong stok sesuai BOM, stok opname ----------
+// Memotong stok semua part BOM untuk `units` unit produk dalam SATU operasi (semua berhasil atau tidak sama sekali).
+export async function consumeBom(bomId, units) {
+  const bom = S.bom.find((b) => b.id === bomId);
+  if (!bom) return { ok: false, error: 'BOM tidak ditemukan.' };
+  if (!Number.isInteger(units) || units < 1) return { ok: false, error: 'Jumlah produksi harus bilangan bulat, minimal 1.' };
+  const chk = bomCheck(bom, S.parts, units);
+  if (chk.missing) return { ok: false, error: `${chk.missing} part belum ada di daftar Part. Tambahkan dulu.` };
+  if (!chk.ok) return { ok: false, error: `Stok kurang untuk ${chk.short} part: ${chk.lines.filter((l) => l.lack > 0).slice(0, 3).map((l) => `${l.no} (kurang ${l.lack})`).join(', ')}${chk.short > 3 ? ', …' : ''}` };
+  const ts = new Date().toISOString(), note = `${units} × ${bom.product_name} (${bom.product_no})`;
+  const adjusts = [], histories = [], low = [];
+  for (const l of chk.lines) {
+    adjusts.push({ no: l.no, delta: -l.need });
+    histories.push(H('bom_use', { ts, no: l.no, name: l.part.name, delta: -l.need, after: l.stock - l.need, loc: codeOf(l.part), note }));
+    low.push(...crossedLow(l.part, l.stock, l.stock - l.need));
+  }
+  await commit({ type: 'stock.batch', adjusts, histories, msg: `Produksi ${units} × ${bom.product_no}` });
+  return { ok: true, count: adjusts.length, units, low };
+}
+
+// entries: [{ no, counted }] — hanya part di rak ini yang sudah dihitung. skipped: jumlah part yang belum diisi (tidak diubah).
+// Stok sistem diganti sesuai hitungan fisik (selisih dihitung dari stok saat ini), semua dalam SATU operasi.
+export async function saveOpname(rackId, entries, skipped = 0) {
+  const rack = S.racks.find((r) => r.id === rackId);
+  if (!rack) return { ok: false, error: 'Rak tidak ditemukan.' };
+  const ts = new Date().toISOString();
+  const adjusts = [], histories = [], low = [];
+  let counted = 0, plus = 0, minus = 0;
+  for (const e of entries) {
+    const p = S.parts.find((x) => x.no === e.no);
+    if (!p || p.rack !== rackId) continue;
+    if (!Number.isInteger(e.counted) || e.counted < 0) return { ok: false, error: `Hitungan ${e.no} harus bilangan bulat, minimal 0.` };
+    const before = Number(p.qty) || 0, delta = e.counted - before;
+    counted++;
+    if (!delta) continue;
+    adjusts.push({ no: p.no, delta });
+    if (delta > 0) plus += delta; else minus -= delta;
+    histories.push(H('opname_adjust', { ts, no: p.no, name: p.name, delta, after: e.counted, loc: codeOf(p), note: `Opname Rak ${rackId}: sistem ${before}, hitung ${e.counted}` }));
+    low.push(...crossedLow(p, before, e.counted));
+  }
+  if (!counted) return { ok: false, error: 'Belum ada part yang dihitung.' };
+  const diff = adjusts.length;
+  histories.push(H('opname_done', { ts, no: rackId, name: `Rak ${rackId}`, delta: diff,
+    note: `${counted} part dihitung, ${diff ? `${diff} selisih (+${plus} / −${minus})` : 'tidak ada selisih'}${skipped ? `, ${skipped} dilewati` : ''}` }));
+  await commit({ type: 'stock.batch', adjusts, histories, rackOpname: { id: rackId, ts, by: S.user.username, counted, diff, skipped }, msg: `Opname Rak ${rackId}` });
+  return { ok: true, counted, diff, plus, minus, low };
 }

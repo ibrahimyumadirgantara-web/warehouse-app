@@ -1,10 +1,10 @@
-// dashboard.js — pencarian + denah rak (70) + daftar part (30).
+// dashboard.js — pencarian (part & produk BOM) + denah rak (70) + daftar hasil (30).
 import { S, onChange, saveRack, deleteRack } from './store.js';
-import { codeOf, can, isAdmin, nextRackId, findFreeSpot, MAX_DIM } from './core.js';
-import { matchParts } from './search.js';
+import { codeOf, can, isAdmin, nextRackId, findFreeSpot, MAX_DIM, bomCheck, isLow, minOf } from './core.js';
+import { matchParts, matchBoms, isExactBom } from './search.js';
 import { $, esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { createMap } from './map.js';
-import { openStock, openPartForm } from './forms.js';
+import { openStock, openPartForm, useBom } from './forms.js';
 import { scanBarcode } from './scanner.js';
 
 const byNo = (a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true });
@@ -12,13 +12,14 @@ const opts = (n, sel) => Array.from({ length: n }, (_, i) => `<option value="${i
 
 export function mountDashboard(root) {
   let q = '', selected = null, edit = false, shown = 200, timer = null;
+  let activeBom = null, units = 1, lowOnly = false; // mode produk: tampilkan semua part sebuah BOM
   const admin = isAdmin(S.user), canStock = can(S.user, 'stock');
 
   root.innerHTML = `<section class="dash">
     <div class="panel searchbar">${icon('search')}
-      <input id="q" type="search" placeholder="Cari no item, nama, atau lokasi (mis. A13)" autocomplete="off" enterkeyhint="search" aria-label="Cari part">
+      <input id="q" type="search" placeholder="Cari part, produk, atau lokasi (mis. A13)" autocomplete="off" enterkeyhint="search" aria-label="Cari part atau produk">
       <button class="icon-btn" id="qclear" aria-label="Hapus pencarian" hidden>${icon('x')}</button>
-      <button class="icon-btn" id="scan" aria-label="Pindai barcode dengan kamera">${icon('camera')}</button>
+      <button class="icon-btn" id="scan" aria-label="Pindai QR code dengan kamera">${icon('camera')}</button>
     </div>
     <div class="split">
       <div class="panel map-panel">
@@ -30,15 +31,16 @@ export function mountDashboard(root) {
       </div>
       <div class="panel list-panel">
         <div class="list-head"><span id="count" aria-live="polite"></span>
+          <button class="btn small" id="lowbtn" hidden></button>
           ${canStock ? `<button class="btn small" id="addpart">${icon('plus')}Part baru</button>` : ''}</div>
         <ul class="list" id="list"></ul>
       </div>
     </div></section>`;
 
-  const input = $('#q', root), list = $('#list', root);
+  const input = $('#q', root), list = $('#list', root), split = $('.split', root);
 
   const map = createMap($('#map', root), {
-    onCellTap: (code) => { q = code; input.value = code; selected = null; shown = 200; refresh(); },
+    onCellTap: (code) => setQuery(code),
     onRackTap: (r) => openRackForm(r),
     onRackMove: async (r, x, y) => {
       const res = await saveRack({ ...r, x, y }, 'move');
@@ -46,12 +48,35 @@ export function mountDashboard(root) {
     },
   });
 
+  // Ganti kata kunci. Bila kata kunci cocok dengan tepat satu produk (dan tidak ada part yang cocok, atau no/nama produknya persis),
+  // langsung masuk mode produk: seluruh part produk itu ditampilkan.
+  function setQuery(v, fromInput = false) {
+    q = v;
+    if (!fromInput) input.value = v;
+    selected = null; shown = 200; activeBom = null; units = 1;
+    if (q) {
+      const hits = matchBoms(S.bom, q);
+      if (hits.length === 1 && (isExactBom(hits[0], q) || !matchParts(S.parts, q).length)) activeBom = hits[0].id;
+    }
+    refresh();
+  }
+  const curBom = () => (activeBom ? S.bom.find((b) => b.id === activeBom) || null : null);
+
   // ---------- Render ----------
-  const results = () => (q ? matchParts(S.parts, q) : S.parts.slice().sort(byNo));
+  const results = () => {
+    const all = q ? matchParts(S.parts, q) : S.parts.slice().sort(byNo);
+    return lowOnly ? all.filter(isLow) : all;
+  };
 
   function hitCodes() {
     const set = new Set();
-    if (selected) {
+    const bom = curBom();
+    if (bom) {
+      for (const l of bomCheck(bom, S.parts, 1).lines) {
+        const c = l.part ? codeOf(l.part) : '';
+        if (c && (!selected || l.no === selected)) set.add(c);
+      }
+    } else if (selected) {
       const p = S.parts.find((x) => x.no === selected);
       if (p && codeOf(p)) set.add(codeOf(p));
     } else if (q) {
@@ -61,23 +86,81 @@ export function mountDashboard(root) {
   }
 
   function row(p) {
-    const qty = Number(p.qty) || 0, loc = codeOf(p);
+    const qty = Number(p.qty) || 0, loc = codeOf(p), low = qty > 0 && isLow(p);
     return `<li class="row${p.no === selected ? ' sel' : ''}" data-no="${esc(p.no)}" tabindex="0" role="button" aria-pressed="${p.no === selected}">
-      <div class="row-main"><span class="row-name">${esc(p.name)}</span><span class="row-meta">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''}</span></div>
-      <span class="loc">${loc || '–'}</span><span class="qty${qty <= 0 ? ' zero' : ''}">${qty}</span>
+      <div class="row-main"><span class="row-name">${esc(p.name)}</span><span class="row-meta">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''}${low ? ` · <b class="warnc">stok rendah (min ${minOf(p)})</b>` : ''}</span></div>
+      <span class="loc">${loc || '–'}</span><span class="qty${qty <= 0 ? ' zero' : low ? ' low' : ''}"${isLow(p) ? ` title="Stok minimum ${minOf(p)}"` : ''}>${qty}</span>
       ${canStock ? `<button class="icon-btn" data-act="stock" aria-label="Ubah stok ${esc(p.name)}">${icon('swap')}</button>` : '<span></span>'}</li>`;
   }
 
+  function prodCard(b) {
+    const chk = bomCheck(b, S.parts, 1);
+    const info = chk.missing ? 'ada part belum terdaftar' : chk.ok ? 'stok cukup' : `${chk.short} part kurang`;
+    return `<li class="row prodhit" data-bom="${esc(b.id)}" tabindex="0" role="button" aria-label="Lihat part produk ${esc(b.product_name)}">
+      <div class="row-main"><span class="row-name">${esc(b.product_name)}</span>
+        <span class="row-meta">${esc(b.product_no)} · ${b.lines.length} part · <span class="${chk.ok ? 'okc' : 'badc'}">${info}</span></span></div>
+      <span class="ptag">Produk</span><span class="chev" aria-hidden="true">›</span><span></span></li>`;
+  }
+
+  function brow(l) {
+    const loc = l.part ? codeOf(l.part) : '';
+    return `<li class="row brow${l.lack > 0 ? ' short' : ''}${l.no === selected ? ' sel' : ''}" data-no="${esc(l.no)}" tabindex="0" role="button" aria-pressed="${l.no === selected}">
+      <div class="row-main"><span class="row-name">${esc(l.name || l.no)}${l.missing ? ' <span class="muted">(belum ada di Part)</span>' : ''}</span>
+        <span class="row-meta">${esc(l.no)} · stok ${l.stock === null ? '–' : l.stock}${l.lack > 0 ? ` · <b class="badc">kurang ${l.lack}</b>` : ''}</span></div>
+      <span class="loc">${loc || '–'}</span><span class="qty${l.lack > 0 ? ' zero' : ''}">−${l.need}</span>
+      ${canStock && l.part ? `<button class="icon-btn" data-act="stock" aria-label="Ubah stok ${esc(l.name)}">${icon('swap')}</button>` : '<span></span>'}</li>`;
+  }
+
+  function renderBomMode(bom) {
+    $('#count', root).textContent = `${bom.lines.length} part untuk ${bom.product_name}`;
+    list.innerHTML = `<li class="bomhead">
+        <div class="bh-top"><button class="btn small" id="bback">‹ Hasil pencarian</button>
+          <div class="bh-title"><b>${esc(bom.product_name)}</b><span class="muted">${esc(bom.product_no)} · ${bom.lines.length} part</span></div></div>
+        <div class="bh-ctl"><label class="bh-units">Jumlah produksi
+            <span class="ustep"><button type="button" data-ustep="-1" aria-label="Kurangi jumlah">−</button><input id="bunits" type="number" inputmode="numeric" min="1" step="1" value="${units}"><button type="button" data-ustep="1" aria-label="Tambah jumlah">+</button></span></label>
+          ${canStock ? '<button class="btn primary" id="bgo">Konfirmasi · potong stok</button>' : ''}</div>
+        <p class="preview" id="bsum" role="status"></p>
+        ${canStock ? '' : '<p class="muted bh-note">Hanya user dengan izin “ubah data” yang dapat memotong stok.</p>'}
+      </li>
+      <li class="bcap" aria-hidden="true"><span>Part</span><span>Lokasi</span><span>Potong</span><span></span></li>`;
+    paintBom();
+  }
+
+  // Isi ulang baris part + ringkasan tanpa menyentuh kolom jumlah (supaya ketikan tidak hilang).
+  function paintBom() {
+    const bom = curBom();
+    if (!bom) return;
+    const valid = Number.isInteger(units) && units >= 1;
+    const chk = bomCheck(bom, S.parts, valid ? units : 1);
+    list.querySelectorAll('.brow').forEach((n) => n.remove());
+    list.insertAdjacentHTML('beforeend', chk.lines.map(brow).join(''));
+    const total = chk.lines.reduce((a, l) => a + l.need, 0);
+    let msg, cls = 'preview ';
+    if (!valid) { msg = 'Jumlah produksi minimal 1.'; cls += 'badc'; }
+    else if (chk.missing) { msg = `${chk.missing} part belum ada di daftar Part. Tambahkan dulu sebelum memotong stok.`; cls += 'badc'; }
+    else if (!chk.ok) { msg = `Stok kurang untuk ${chk.short} part (ditandai merah). Stok tidak bisa dipotong.`; cls += 'badc'; }
+    else { msg = `Siap dipotong: ${chk.lines.length} part, total ${total} pcs untuk ${units} unit.`; cls += 'okc'; }
+    const sum = $('#bsum', list);
+    sum.textContent = msg; sum.className = cls;
+    const go = $('#bgo', list);
+    if (go) go.disabled = !valid || !chk.ok;
+  }
+
   function renderList() {
-    const res = results();
-    $('#count', root).textContent = q ? `${res.length} part ditemukan` : `${S.parts.length} part`;
-    if (!S.parts.length) {
+    const bom = curBom();
+    if (bom) { renderBomMode(bom); return; }
+    const res = results(), boms = q && !lowOnly ? matchBoms(S.bom, q) : [];
+    $('#count', root).textContent = q ? `${boms.length ? `${boms.length} produk · ` : ''}${res.length} part ditemukan` : `${S.parts.length} part`;
+    if (!S.parts.length && !S.bom.length) {
       list.innerHTML = `<li class="empty"><b>Belum ada part</b><span>${canStock ? 'Ketuk “Part baru” untuk menambahkan part pertama.' : 'Minta admin menambahkan part.'}</span></li>`;
-    } else if (!res.length) {
-      list.innerHTML = `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama part, atau kode lokasi seperti A13.</span>
+    } else if (lowOnly && !res.length) {
+      list.innerHTML = '<li class="empty"><b>Tidak ada part dengan stok rendah</b><span>Semua stok di atas batas minimum.</span></li>';
+    } else if (!res.length && !boms.length) {
+      list.innerHTML = `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama part atau produk, atau kode lokasi seperti A13.</span>
         ${canStock ? '<button class="btn small" id="addq" style="align-self:flex-start;margin-top:6px">Tambah part dengan no item ini</button>' : ''}</li>`;
     } else {
-      list.innerHTML = res.slice(0, shown).map(row).join('') +
+      list.innerHTML = (boms.length ? `<li class="seclabel">Produk (BOM)</li>${boms.slice(0, 20).map(prodCard).join('')}${res.length ? '<li class="seclabel">Part</li>' : ''}` : '') +
+        res.slice(0, shown).map(row).join('') +
         (res.length > shown ? `<li class="more"><button class="btn small" id="more">Tampilkan ${res.length - shown} lagi</button></li>` : '');
     }
   }
@@ -86,6 +169,12 @@ export function mountDashboard(root) {
     map.render(S.racks, new Set(S.parts.map(codeOf).filter(Boolean)), hitCodes(), edit);
   }
   function refresh() {
+    if (activeBom && !curBom()) activeBom = null; // BOM dihapus/berubah dari perangkat lain
+    split.classList.toggle('bommode', !!activeBom);
+    const nLow = S.parts.filter(isLow).length, lb = $('#lowbtn', root);
+    lb.hidden = (!nLow && !lowOnly) || !!activeBom;
+    lb.textContent = lowOnly ? `Stok rendah · ${nLow} ✕` : `⚠ ${nLow} stok rendah`;
+    lb.classList.toggle('primary', lowOnly);
     $('#qclear', root).hidden = !q;
     renderMap(); renderList();
   }
@@ -93,40 +182,64 @@ export function mountDashboard(root) {
   // ---------- Interaksi ----------
   input.addEventListener('input', () => {
     clearTimeout(timer);
-    timer = setTimeout(() => { q = input.value.trim(); selected = null; shown = 200; refresh(); }, 120);
+    timer = setTimeout(() => setQuery(input.value.trim(), true), 120);
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); });
-  $('#qclear', root).onclick = () => { q = ''; input.value = ''; selected = null; refresh(); input.focus(); };
+  $('#qclear', root).onclick = () => { setQuery(''); input.focus(); };
 
   $('#scan', root).onclick = async () => {
     const code = await scanBarcode();
     if (!code) return;
-    q = code; input.value = code; shown = 200;
+    setQuery(code);
     const exact = S.parts.find((p) => String(p.no).toLowerCase() === code.toLowerCase());
-    selected = exact ? exact.no : null;
-    refresh();
-    if (!exact && !matchParts(S.parts, code).length) toast(`Kode ${code} tidak ditemukan.`, 'warn');
+    if (exact && !activeBom) { selected = exact.no; refresh(); }
+    if (!exact && !matchParts(S.parts, code).length && !matchBoms(S.bom, code).length) toast(`Kode ${code} tidak ditemukan.`, 'warn');
   };
+
+  $('#lowbtn', root).onclick = () => { lowOnly = !lowOnly; selected = null; shown = 200; refresh(); };
 
   function pick(li) {
     const no = li.dataset.no;
     selected = selected === no ? null : no;
     refresh();
   }
+  function openProduct(id) { activeBom = id; units = 1; selected = null; refresh(); }
+
   list.addEventListener('click', (e) => {
     if (e.target.closest('#more')) { shown += 200; renderList(); return; }
-    if (e.target.closest('#addq')) { openPartForm(null, { preset: { no: q }, onSaved: (no) => { q = no; input.value = no; selected = no; refresh(); } }); return; }
+    if (e.target.closest('#addq')) { openPartForm(null, { preset: { no: q }, onSaved: (no) => { setQuery(no); selected = no; refresh(); } }); return; }
+    if (e.target.closest('#bback')) { activeBom = null; selected = null; refresh(); return; }
+    const st = e.target.closest('[data-ustep]');
+    if (st) {
+      units = Math.max(1, (Number.isInteger(units) ? units : 0) + Number(st.dataset.ustep));
+      $('#bunits', list).value = units; paintBom(); return;
+    }
+    if (e.target.closest('#bgo')) {
+      const bom = curBom();
+      if (bom) useBom(bom, units).then((ok) => { if (ok) refresh(); });
+      return;
+    }
+    const card = e.target.closest('.prodhit');
+    if (card) { openProduct(card.dataset.bom); return; }
     const li = e.target.closest('.row');
     if (!li) return;
     if (e.target.closest('[data-act=stock]')) openStock(li.dataset.no); else pick(li);
   });
+  list.addEventListener('input', (e) => {
+    if (e.target.id !== 'bunits') return;
+    units = e.target.value === '' ? 0 : Number(e.target.value);
+    paintBom();
+  });
   list.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('row')) { e.preventDefault(); pick(e.target); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('row')) {
+      e.preventDefault();
+      if (e.target.classList.contains('prodhit')) openProduct(e.target.dataset.bom); else pick(e.target);
+    }
   });
 
   if (canStock) {
     $('#addpart', root).onclick = () => openPartForm(null, {
-      onSaved: (no, isNew) => { if (isNew) { q = no; input.value = no; selected = no; refresh(); } },
+      onSaved: (no, isNew) => { if (isNew) { setQuery(no); selected = no; refresh(); } },
     });
   }
   if (admin) {

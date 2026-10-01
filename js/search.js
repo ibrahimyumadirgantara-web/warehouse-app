@@ -38,3 +38,29 @@ export function matchParts(parts, query) {
     .sort((a, b) => b[0] - a[0] || String(a[1].no).localeCompare(String(b[1].no), undefined, { numeric: true }))
     .map((x) => x[1]);
 }
+
+// Pencarian produk (BOM) dengan aturan yang sama: tiap kata harus cocok dengan awal kata di no item produk / nama produk.
+export function matchBoms(boms, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [];
+  const tokens = q.split(/\s+/);
+  const rows = boms.map((b) => {
+    const no = String(b.product_no).toLowerCase(), name = String(b.product_name || '').toLowerCase();
+    const hay = `${no} ${name}`;
+    return { b, no, name, hay, words: wordsOf(hay) };
+  });
+  const strict = (r) => tokens.every((t) => (/^[a-z0-9]+$/.test(t) ? r.words.some((w) => w.startsWith(t)) : r.hay.includes(t)));
+  let hits = rows.filter(strict);
+  if (!hits.length) hits = rows.filter((r) => tokens.every((t) => r.hay.includes(t)));
+  const score = (r) => (r.no === q ? 100 : r.name === q ? 90 : r.no.startsWith(tokens[0]) ? 80 : r.name.startsWith(tokens[0]) ? 60 : 40);
+  return hits
+    .map((r) => [score(r), r.b])
+    .sort((a, b) => b[0] - a[0] || String(a[1].product_no).localeCompare(String(b[1].product_no), undefined, { numeric: true }))
+    .map((x) => x[1]);
+}
+
+// True bila kueri persis sama dengan no item produk atau nama produk (tanpa membedakan huruf besar/kecil).
+export const isExactBom = (b, query) => {
+  const q = String(query || '').trim().toLowerCase();
+  return !!q && (String(b.product_no).toLowerCase() === q || String(b.product_name || '').toLowerCase() === q);
+};

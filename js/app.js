@@ -4,7 +4,7 @@ import * as gh from './github.js';
 import * as sync from './sync.js';
 import * as store from './store.js';
 import { S } from './store.js';
-import { can, isAdmin, hashPassword } from './core.js';
+import { can, isAdmin, hashPassword, lowParts } from './core.js';
 import { $, $$, esc, icon, logoSvg, modal, toast } from './ui.js';
 import { mountDashboard } from './dashboard.js';
 import { mountParts } from './parts.js';
@@ -47,7 +47,7 @@ function renderShell() {
   app.innerHTML = `<div id="shell">
     <div class="brand">${logoSvg}<span>Smart Warehouse</span></div>
     <nav class="nav" aria-label="Menu utama">${items.map(([k, v]) =>
-      `<button data-view="${k}"${k === current ? ' aria-current="page"' : ''}>${icon(v.icon)}<span>${v.label}</span></button>`).join('')}</nav>
+      `<button data-view="${k}"${k === current ? ' aria-current="page"' : ''}>${icon(v.icon)}<span>${v.label}</span>${k === 'parts' ? '<b class="nbadge" id="nlow" hidden></b>' : ''}</button>`).join('')}</nav>
     <div class="tools"><button class="chip" id="sync"></button>
       <button class="icon-btn" id="theme" aria-label="Ganti tema terang/gelap"></button>
       <button class="icon-btn" id="menu" aria-label="Pengaturan">${icon('menu')}</button></div>
@@ -58,7 +58,18 @@ function renderShell() {
   $('#sync').onclick = () => { if (sync.state.error) toast(sync.state.error, 'error'); sync.flush().then(() => sync.pull()); };
   $$('.nav button').forEach((b) => b.addEventListener('click', () => openView(b.dataset.view)));
   renderSync();
+  updateLowBadge();
   openView(current);
+}
+// Lencana jumlah part yang stoknya di bawah/sama dengan stok minimum.
+function updateLowBadge() {
+  const el = $('#nlow');
+  if (!el) return;
+  const n = lowParts(S.parts).length;
+  el.hidden = !n;
+  el.textContent = n > 99 ? '99+' : n;
+  el.title = `${n} part stok rendah`;
+  el.setAttribute('aria-label', `${n} part stok rendah`);
 }
 function openView(k) {
   current = k;
@@ -153,6 +164,8 @@ function enter(u) {
   S.user = u;
   localStorage.setItem(SESSION, JSON.stringify({ u: u.username, t: Date.now() }));
   renderShell();
+  const low = lowParts(S.parts).length;
+  if (low && can(u, 'parts')) toast(`${low} part stok rendah. Buka Part & BOM → Stok rendah.`, 'warn');
   sync.startAuto();
   sync.ensureSeed().then(() => sync.pull()).catch(() => {}); // repo lama: buat data/bom.json bila belum ada
   if (u.mustChange) passwordModal(true);
@@ -212,6 +225,7 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
   sync.onStatus(renderSync);
+  store.onChange(updateLowBadge);
   sync.setRemoteHandler(async () => {
     const sig = () => JSON.stringify(S.user ? [S.user.role, S.user.perms] : null);
     const before = sig();

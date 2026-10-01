@@ -1,7 +1,9 @@
 // sheets.js — logika murni: baca tabel Part/BOM dari baris Excel, validasi, dan susun sheet ekspor/template.
 
-export const PART_HEADERS = ['No Item', 'Nama Part', 'Spesifikasi', 'Total Qty', 'Rak', 'Kolom', 'Baris'];
+export const BOM_HEADERS = ['No Item', 'Nama Part', 'Spesifikasi', 'Total Qty', 'Rak', 'Kolom', 'Baris'];
+export const PART_HEADERS = [...BOM_HEADERS, 'Stok Min'];
 const WIDTHS = [18, 30, 32, 12, 8, 8, 8];
+const PART_WIDTHS = [...WIDTHS, 10];
 
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const str = (v) => (v === null || v === undefined ? '' : typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(v)) : String(v).trim());
@@ -17,6 +19,7 @@ const SYN = {
   col: ['kolom', 'col', 'column'],
   row: ['baris', 'row'],
   loc: ['lokasi', 'location', 'bin'],
+  min: ['stokmin', 'stokminimum', 'minstok', 'minimumstok', 'minqty', 'minimum', 'minstock', 'minimumstock', 'min'],
 };
 const PRODUCT_NAME = ['namaproduk', 'produk', 'productname', 'product'];
 const PRODUCT_NO = ['noitemproduk', 'noproduk', 'kodeproduk', 'productno', 'nomorproduk', 'noitemproduct'];
@@ -62,6 +65,11 @@ function readLines(rows, hi, racks) {
     if (!no) { out.push({ line, err: 'No item kosong' }); continue; }
     if (/^contoh[-_ ]/i.test(no)) { samples++; continue; }
     const q = parseQty(g('qty'));
+    let min, minErr = '';
+    if (hi.map.min !== undefined && g('min') !== '' && g('min') !== null && g('min') !== undefined) {
+      const m = parseQty(g('min'));
+      if (m.err) minErr = 'Stok min harus bilangan bulat, 0 atau lebih'; else min = m.qty;
+    }
     let rack = str(g('rack')).toUpperCase(), col = str(g('col')), row = str(g('row'));
     if (!rack && !col && !row && hi.map.loc !== undefined) {
       const m = /^([A-Za-z])([1-9])([1-9])$/.exec(str(g('loc')).replace(/\s/g, ''));
@@ -77,7 +85,7 @@ function readLines(rows, hi, racks) {
         locErr = `Kolom/baris di luar ukuran Rak ${rack} (${rk.cols} kolom × ${rk.rows} baris)`;
       } else loc = { rack, col: c, row: rw };
     }
-    out.push({ line, no, name: str(g('name')), spec: str(g('spec')), qty: q.qty, qtyErr: q.err || '', ...loc, locErr });
+    out.push({ line, no, name: str(g('name')), spec: str(g('spec')), qty: q.qty, qtyErr: q.err || '', min, minErr, ...loc, locErr });
   }
   return { items: out, samples };
 }
@@ -94,11 +102,11 @@ export function parsePartSheets(sheets, racks) {
     let noLocation = 0;
     for (const it of items) {
       if (it.err) { errors.push({ line: it.line, msg: it.err }); continue; }
-      const bad = it.qtyErr || it.locErr || (!it.name ? 'Nama part kosong' : '') || (seen.has(it.no) ? 'No item ganda di file ini' : '');
+      const bad = it.qtyErr || it.minErr || it.locErr || (!it.name ? 'Nama part kosong' : '') || (seen.has(it.no) ? 'No item ganda di file ini' : '');
       if (bad) { errors.push({ line: it.line, no: it.no, msg: bad }); continue; }
       seen.add(it.no);
       if (!it.rack) noLocation++;
-      rows.push({ no: it.no, name: it.name, spec: it.spec, qty: it.qty, rack: it.rack, col: it.col, row: it.row });
+      rows.push({ no: it.no, name: it.name, spec: it.spec, qty: it.qty, rack: it.rack, col: it.col, row: it.row, ...(it.min !== undefined ? { min: it.min } : {}) });
     }
     return { ok: true, sheet: sh.name, rows, errors, samples, noLocation };
   }
@@ -159,13 +167,13 @@ export function parseBomSheets(sheets, racks, parts) {
 }
 
 // ---------- Ekspor ----------
-const H = () => PART_HEADERS.map((v) => ({ v, s: 'h' }));
+const H = (hs = BOM_HEADERS) => hs.map((v) => ({ v, s: 'h' }));
 const byNo = (a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true });
 
 export function partsToSheet(parts) {
   return {
-    name: 'Part', freeze: 1, widths: WIDTHS,
-    rows: [H(), ...parts.slice().sort(byNo).map((p) => [p.no, p.name, p.spec || '', Number(p.qty) || 0, p.rack || '', p.col ?? '', p.row ?? ''])],
+    name: 'Part', freeze: 1, widths: PART_WIDTHS,
+    rows: [H(PART_HEADERS), ...parts.slice().sort(byNo).map((p) => [p.no, p.name, p.spec || '', Number(p.qty) || 0, p.rack || '', p.col ?? '', p.row ?? '', Number(p.min) > 0 ? Number(p.min) : ''])],
   };
 }
 
@@ -204,8 +212,8 @@ const NOTE = (v) => ({ v, s: 'note' });
 export function partTemplate() {
   return [
     {
-      name: 'Part', freeze: 1, widths: WIDTHS,
-      rows: [H(), ['CONTOH-001', 'Baut M8 x 20', 'Baja galvanis, panjang 20 mm', 120, 'A', 1, 3]],
+      name: 'Part', freeze: 1, widths: PART_WIDTHS,
+      rows: [H(PART_HEADERS), ['CONTOH-001', 'Baut M8 x 20', 'Baja galvanis, panjang 20 mm', 120, 'A', 1, 3, 30]],
     },
     {
       name: 'Petunjuk', widths: [96],
@@ -217,6 +225,7 @@ export function partTemplate() {
         ['Rak, Kolom, Baris: lokasi part. Rak berupa satu huruf yang sudah ada di denah, kolom dan baris berupa angka 1–9.'],
         ['Contoh: Rak A, Kolom 1, Baris 3 → kode lokasi A13. Boleh dikosongkan bila lokasi belum ditentukan.'],
         ['Kolom "Lokasi" dengan kode seperti A13 juga dikenali bila kolom Rak/Kolom/Baris tidak ada.'],
+        ['Stok Min (opsional): batas stok minimum. Bila stok sama dengan atau di bawah angka ini, part muncul di notifikasi stok rendah. Kosong = tidak diubah, 0 = tanpa batas.'],
         [NOTE('Sel yang diisi pengguna: semua baris data di bawah header pada sheet "Part".')],
       ],
     },

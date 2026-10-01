@@ -23,6 +23,22 @@ export const uid = () =>
     ? crypto.randomUUID()
     : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
+// ---------- Stok minimum ----------
+// Part dianggap "stok rendah" bila stok minimum diisi (> 0) dan stok sekarang sama atau di bawahnya.
+export const minOf = (p) => Math.max(0, Math.floor(Number(p && p.min) || 0));
+export const isLow = (p) => minOf(p) > 0 && (Number(p.qty) || 0) <= minOf(p);
+export const lowParts = (parts) => parts.filter(isLow);
+
+// ---------- BOM: kebutuhan vs stok untuk `units` unit produk ----------
+export function bomCheck(bom, parts, units = 1) {
+  const map = new Map(parts.map((p) => [p.no, p]));
+  const lines = bom.lines.map((l) => {
+    const part = map.get(l.no) || null, need = l.qty * units, stock = part ? Number(part.qty) || 0 : null;
+    return { no: l.no, name: part ? part.name : l.name || '', part, per: l.qty, need, stock, lack: part ? Math.max(0, need - stock) : need, missing: !part };
+  });
+  return { lines, short: lines.filter((l) => l.lack > 0).length, missing: lines.filter((l) => l.missing).length, ok: lines.every((l) => l.lack === 0) };
+}
+
 // ---------- Lokasi & rak ----------
 export const codeOf = (p) => (p && p.rack ? `${String(p.rack).toUpperCase()}${p.col}${p.row}` : '');
 
@@ -87,7 +103,9 @@ export function targetsOf(op) {
     t.push(PATHS.bom);
     if (op.type === 'bom.upsert' && op.newParts && op.newParts.length) t.push(PATHS.parts);
   }
+  if (op.type === 'stock.batch' && op.rackOpname) t.push(PATHS.racks);
   if (op.history) t.push(historyPath(op.history.ts));
+  if (op.histories && op.histories.length) t.push(historyPath(op.histories[0].ts));
   return t;
 }
 
@@ -95,18 +113,24 @@ export function targetsOf(op) {
 // yang mengubah stok bersamaan tidak saling menimpa.
 export function applyOp(op, kind, items) {
   if (kind === 'history') {
-    if (op.history && !items.some((h) => h.id === op.history.id)) items.push(op.history);
+    const list = op.histories || (op.history ? [op.history] : []);
+    for (const h of list) if (!items.some((x) => x.id === h.id)) items.push(h);
     return items;
   }
   if (kind === 'parts') {
     if (op.type === 'part.upsert') {
       const p = op.part;
       const cur = items.find((x) => x.no === p.no);
-      if (cur) Object.assign(cur, { name: p.name, spec: p.spec, rack: p.rack, col: p.col, row: p.row });
+      if (cur) Object.assign(cur, { name: p.name, spec: p.spec, rack: p.rack, col: p.col, row: p.row }, p.min !== undefined ? { min: p.min } : {});
       else if (op.isNew) items.push({ ...p });
     } else if (op.type === 'stock.adjust') {
       const cur = items.find((x) => x.no === op.no);
       if (cur) cur.qty = Math.max(0, (Number(cur.qty) || 0) + op.delta);
+    } else if (op.type === 'stock.batch') {
+      for (const a of op.adjusts) {
+        const cur = items.find((x) => x.no === a.no);
+        if (cur) cur.qty = Math.max(0, (Number(cur.qty) || 0) + a.delta);
+      }
     } else if (op.type === 'part.delete') {
       const i = items.findIndex((x) => x.no === op.no);
       if (i >= 0) items.splice(i, 1);
@@ -130,7 +154,10 @@ export function applyOp(op, kind, items) {
       if (i >= 0) items.splice(i, 1);
     }
   } else if (kind === 'racks') {
-    if (op.type === 'rack.upsert') {
+    if (op.type === 'stock.batch' && op.rackOpname) {
+      const r = items.find((x) => x.id === op.rackOpname.id);
+      if (r) r.lastOpname = { ts: op.rackOpname.ts, by: op.rackOpname.by, counted: op.rackOpname.counted, diff: op.rackOpname.diff, skipped: op.rackOpname.skipped };
+    } else if (op.type === 'rack.upsert') {
       const i = items.findIndex((x) => x.id === op.rack.id);
       if (i >= 0) items[i] = { ...items[i], ...op.rack };
       else items.push({ ...op.rack });

@@ -1,6 +1,7 @@
 // bom.js — tab BOM: daftar produk, detail kebutuhan vs stok, impor/ekspor Excel.
 import { S, saveBom, deleteBom } from './store.js';
-import { can, isAdmin } from './core.js';
+import { can, isAdmin, bomCheck } from './core.js';
+import { useBom } from './forms.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parseBomSheets, bomsToSheets, bomTemplate } from './sheets.js';
 import { esc, icon, modal, toast, confirmDialog, pickFile, today, safeName } from './ui.js';
@@ -61,7 +62,7 @@ export function bomTab(acts, body) {
           <label style="width:150px">Jumlah produksi<input id="units" type="number" inputmode="numeric" min="1" step="1" value="1"></label>
           <p class="preview" id="sum" style="flex:1"></p></div>
         <div class="tblwrap"><table class="btbl"><thead><tr><th>No Item</th><th>Nama Part</th><th class="r">Butuh</th><th class="r">Stok</th><th>Lokasi</th><th class="r">Kurang</th></tr></thead><tbody id="rows"></tbody></table></div>`,
-      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button><button class="btn primary" data-close>Tutup</button>`,
+      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button>${canEdit ? '<button class="btn primary" id="use">Potong stok</button>' : '<button class="btn primary" data-close>Tutup</button>'}`,
     });
     const units = m.$('#units');
     function paint() {
@@ -79,10 +80,18 @@ export function bomTab(acts, body) {
       m.$('#sum').textContent = short ? `Untuk ${u} unit, ${short} part kurang.` : `Stok cukup untuk ${u} unit.`;
       m.$('#sum').className = 'preview ' + (short ? 'badc' : 'okc');
       if (n !== null && short) m.$('#sum').textContent += ` Stok sekarang cukup untuk ${n} unit.`;
+      const use = m.$('#use');
+      if (use) use.disabled = !bomCheck(b, S.parts, u).ok;
     }
     units.addEventListener('input', paint);
     paint();
     m.$('#exp').onclick = () => downloadBytes(writeWorkbook(bomsToSheets([b], S.parts)), `bom-${safeName(b.product_no)}-${today()}.xlsx`);
+    const use = m.$('#use');
+    if (use) use.onclick = async () => {
+      const u = Math.max(1, Math.floor(Number(units.value)) || 1);
+      m.close();
+      await useBom(b, u);
+    };
     const del = m.$('#del');
     if (del) del.onclick = async () => {
       m.close();

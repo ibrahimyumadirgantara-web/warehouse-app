@@ -1,6 +1,6 @@
 // forms.js — dialog bersama: ubah stok dan tambah/edit/hapus part (dipakai Dashboard dan Part & BOM).
-import { S, adjustStock, savePart, deletePart } from './store.js';
-import { codeOf, can, isAdmin } from './core.js';
+import { S, adjustStock, savePart, deletePart, consumeBom } from './store.js';
+import { codeOf, can, isAdmin, bomCheck } from './core.js';
 import { esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { scanBarcode } from './scanner.js';
 
@@ -48,6 +48,7 @@ export function openStock(no) {
     if (!r.ok) { m.$('#serr').textContent = r.error; return; }
     m.close();
     toast(`${p.name}: ${qty} → ${r.after}`, 'ok');
+    notifyLow(r.low);
   }
   m.$('#ssave').onclick = save;
   m.$('#sf').addEventListener('submit', (e) => { e.preventDefault(); save(); });
@@ -68,6 +69,7 @@ export function openPartForm(part, { onSaved, preset } = {}) {
       <label>Nama part<input name="name" value="${esc(p.name)}" autocomplete="off"></label>
       <label>Spesifikasi<input name="spec" value="${esc(p.spec || '')}" autocomplete="off"></label>
       ${isNew ? `<label>Qty awal<input name="qty" type="number" inputmode="numeric" min="0" step="1" value="${p.qty}"></label>` : ''}
+      <label>Stok minimum (opsional)<input name="min" type="number" inputmode="numeric" min="0" step="1" value="${Number(p.min) > 0 ? Number(p.min) : ''}" placeholder="kosong / 0 = tanpa peringatan"></label>
       <div class="grid3">
         <label>Rak<select name="rack"><option value="">— tanpa lokasi —</option>${S.racks.map((r) => `<option value="${esc(r.id)}"${r.id === p.rack ? ' selected' : ''}>Rak ${esc(r.id)}</option>`).join('')}</select></label>
         <label>Kolom<select name="col"></select></label><label>Baris<select name="row"></select></label></div>
@@ -95,8 +97,10 @@ export function openPartForm(part, { onSaved, preset } = {}) {
     if (!name) return err('Nama part wajib diisi.');
     const qty = isNew ? Number(el('qty').value) : Number(p.qty) || 0;
     if (!Number.isInteger(qty) || qty < 0) return err('Qty awal harus bilangan bulat, minimal 0.');
+    const min = el('min').value.trim() === '' ? 0 : Number(el('min').value);
+    if (!Number.isInteger(min) || min < 0) return err('Stok minimum harus bilangan bulat, minimal 0.');
     const rack = el('rack').value;
-    const part2 = { no, name, spec: el('spec').value.trim(), qty, rack, col: rack ? Number(el('col').value) : null, row: rack ? Number(el('row').value) : null };
+    const part2 = { no, name, spec: el('spec').value.trim(), qty, min, rack, col: rack ? Number(el('col').value) : null, row: rack ? Number(el('row').value) : null };
     const r = await savePart(part2, isNew);
     if (!r.ok) return err(r.error);
     m.close();
@@ -115,4 +119,26 @@ export function openPartForm(part, { onSaved, preset } = {}) {
       if (r.ok) toast(`Part ${p.no} dihapus`, 'ok'); else toast(r.error, 'error');
     }
   };
+}
+
+// Toast peringatan untuk part yang baru jatuh ke/di bawah stok minimum. low: [{ no, name, qty, min }]
+export function notifyLow(low) {
+  if (!low || !low.length) return;
+  const one = low[0];
+  toast(low.length === 1 ? `Stok rendah: ${one.name} tinggal ${one.qty} (minimum ${one.min})` : `Stok rendah: ${low.length} part di bawah minimum (${low.slice(0, 2).map((x) => x.name).join(', ')}, …)`, 'warn');
+}
+
+// Konfirmasi lalu potong stok semua part BOM untuk `units` unit. Resolve true bila stok jadi dipotong.
+export async function useBom(bom, units) {
+  const chk = bomCheck(bom, S.parts, units);
+  if (chk.missing) { toast(`${chk.missing} part belum ada di daftar Part. Tambahkan dulu.`, 'error'); return false; }
+  if (!chk.ok) { toast(`Stok kurang untuk ${chk.short} part. Stok tidak dipotong.`, 'error'); return false; }
+  const total = chk.lines.reduce((a, l) => a + l.need, 0);
+  const ok = await confirmDialog(`Potong stok ${chk.lines.length} part (total ${total} pcs) untuk ${units} unit ${bom.product_name} (${bom.product_no})? Tindakan ini tercatat di riwayat.`, 'Potong stok');
+  if (!ok) return false;
+  const r = await consumeBom(bom.id, units);
+  if (!r.ok) { toast(r.error, 'error'); return false; }
+  toast(`Stok dipotong: ${r.count} part untuk ${units} unit ${bom.product_name}`, 'ok');
+  notifyLow(r.low);
+  return true;
 }

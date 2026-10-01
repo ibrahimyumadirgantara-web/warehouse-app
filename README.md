@@ -1,4 +1,4 @@
-# Smart Warehouse — Lengkap (Tahap 1–3)
+# Smart Warehouse — Lengkap (Tahap 1–4)
 
 Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON di repo GitHub private.
 
@@ -64,6 +64,24 @@ Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON 
   - Kamera butuh HTTPS. GitHub Pages sudah HTTPS.
   - Kode yang tidak ada di sistem menampilkan tombol "Tambah part dengan no item ini".
 
+## Tahap 4: Cari produk, Stok minimum, Opname
+- **Cari produk (BOM) di Dashboard**: ketik no item atau nama produk yang sudah diimpor lewat BOM (mis. `x100`).
+  - Hasil pencarian memisahkan **Produk (BOM)** dan **Part**. Bila yang cocok hanya satu produk, seluruh part-nya langsung tampil, dan lokasinya berkedip di denah.
+  - Isi jumlah produksi, lalu ketuk **Konfirmasi · potong stok**. Setelah dialog konfirmasi, stok semua part dipotong sesuai BOM × jumlah dalam satu operasi: semua berhasil atau tidak sama sekali.
+  - Part yang kurang ditandai merah dan tombol dikunci. Part yang belum terdaftar di daftar Part juga memblokir pemotongan.
+  - Tombol **Potong stok** juga ada di detail BOM (Part & BOM → BOM). Setiap pemotongan tercatat di Riwayat sebagai "Produksi (BOM)" per part.
+  - Mengetik nama part (mis. `baut`) tetap hanya menampilkan part.
+- **Notifikasi stok minimum**: isi *Stok minimum* di form part atau kolom **Stok Min** pada Excel (template Part sudah punya kolom ini; kosong = tidak diubah, 0 = tanpa batas).
+  - Part dengan stok ≤ minimum: angka berwarna kuning, ada lencana merah di menu Part & BOM, dan toast saat login.
+  - Toast juga muncul tepat saat stok baru turun melewati batas (ubah stok, potong BOM, atau opname).
+  - Tombol "⚠ N stok rendah" di Dashboard dan "Stok rendah (N)" di tab Part menyaring daftar. Ekspor Part menyertakan Stok Min.
+- **Stok opname per rak** (Part & BOM → Opname):
+  - Pilih rak, isi hitungan fisik tiap part (urut baris lalu kolom), selisih tampil langsung. Tombol "Pindai part" melompat ke part yang QR-nya dipindai.
+  - Part yang dikosongkan **tidak diubah**. "Sisanya sesuai sistem" mengisi sisa dengan stok sistem (hanya bila fisiknya sudah diperiksa).
+  - Draf hitungan tersimpan di perangkat dan dilanjutkan otomatis bila aplikasi ditutup.
+  - Tinjau selisih lalu simpan: stok sistem diganti menjadi hitungan fisik. Riwayat mencatat tiap selisih dan ringkasan opname. Kartu rak menampilkan opname terakhir (kapan dan oleh siapa).
+  - Hitungan didasarkan pada selisih, jadi perubahan stok oleh user lain saat Anda menghitung tidak saling menimpa.
+
 ## Catatan penting
 - Setiap aksi langsung di-commit ke repo data. Tanda di kanan atas menunjukkan status sinkronisasi.
 - Offline: aksi masuk antrean dan terkirim otomatis saat online lagi.
@@ -77,11 +95,11 @@ index.html  manifest.json  sw.js
 css/   themes.css  main.css
 js/    app.js  core.js  db.js  github.js  sync.js  store.js  ui.js
        search.js  map.js  dashboard.js  forms.js
-       parts.js  bom.js  sheets.js  xlsx.js
+       parts.js  bom.js  opname.js  sheets.js  xlsx.js
        users.js  report.js  scanner.js  qr.js
 icons/  templates/
 ```
 Data di repo private: `data/parts.json`, `racks.json`, `users.json`, `bom.json`, `history-YYYY-MM.json`.
 
 ## Ide lanjutan (belum ada)
-- Notifikasi stok minimum, stok opname per rak, cetak label QR.
+- Cetak label QR per part/rak, laporan stok rendah ke Excel, notifikasi di luar aplikasi (email/WhatsApp).
