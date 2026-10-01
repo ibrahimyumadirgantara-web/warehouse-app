@@ -1,9 +1,9 @@
 // Service worker: jaringan dulu, cache sebagai cadangan (aplikasi tetap terbuka saat offline).
-const V = 'swl-v6';
+const V = 'swl-v4';
 const SHELL = ['./', 'index.html', 'manifest.json', 'css/themes.css', 'css/main.css',
   'js/app.js', 'js/core.js', 'js/db.js', 'js/github.js', 'js/sync.js', 'js/store.js',
   'js/ui.js', 'js/map.js', 'js/dashboard.js', 'js/search.js', 'js/forms.js', 'js/parts.js', 'js/bom.js',
-  'js/sheets.js', 'js/xlsx.js', 'js/users.js', 'js/report.js', 'js/scanner.js', 'js/barcode.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+  'js/sheets.js', 'js/xlsx.js', 'js/users.js', 'js/report.js', 'js/scanner.js', 'js/qr.js', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

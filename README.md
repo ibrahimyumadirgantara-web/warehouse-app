@@ -1,8 +1,11 @@
-# Smart Warehouse — Tahap 1 (Fondasi + Dashboard)
+# Smart Warehouse — Lengkap (Tahap 1–3)
 
 Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON di repo GitHub private.
 
 ## Pasang (sekali, ±10 menit)
+
+> Sudah memasang Tahap 1 atau 2? Cukup ganti semua file di repo aplikasi dengan isi zip ini. Data di repo private tidak berubah.
+> Setelah GitHub Pages memperbarui situs, tutup dan buka lagi aplikasinya (di HP: tutup lalu buka ulang) agar versi baru dimuat.
 
 **1. Repo aplikasi (publik)**
 - GitHub → New repository → nama `warehouse-app` → Public.
@@ -33,10 +36,38 @@ Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON 
 - **Admin**: "Atur rak" → geser rak, ketuk rak untuk ubah ukuran/hapus, "Rak baru" untuk menambah.
 - **Tampilan**: ikon bulan/matahari = gelap/terang. ⋯ → Pengaturan → Otomatis / Mobile / Desktop.
 
+## Tahap 2: Part & BOM
+- **Template**: `templates/template-part.xlsx` dan `templates/template-bom.xlsx` (juga tombol *Template* di aplikasi).
+  Baris contoh berawalan `CONTOH-` dilewati otomatis saat impor.
+- **Part**: kolom `No Item, Nama Part, Spesifikasi, Total Qty, Rak, Kolom, Baris`. Impor menampilkan pratinjau (baru / sudah ada / baris bermasalah) sebelum disimpan.
+  Part yang sudah ada dilewati; admin bisa memilih *perbarui* (nama, lokasi, dan qty diganti sesuai file).
+- **BOM**: baris 1 = `Nama Produk` + `No Item Produk`, lalu tabel part yang sama. `Total Qty` di BOM = kebutuhan per 1 produk.
+  Satu file boleh berisi banyak produk (satu sheet per produk). Part yang belum ada dibuat otomatis dengan stok 0.
+- Detail BOM menampilkan kebutuhan vs stok untuk jumlah produksi tertentu, dan berapa unit yang bisa dibuat dari stok sekarang.
+- Ekspor menghasilkan file dengan format yang sama, jadi bisa diedit lalu diimpor kembali.
+- Impor/hapus part: perlu izin ubah data. Hapus part dan hapus BOM: khusus admin.
+- Pencarian ada di `js/search.js` (terpisah dari `core.js`). Bila Anda sudah punya versi perbaikan sendiri, tempel fungsi `matchParts` Anda di file itu.
+
+## Tahap 3: User, Riwayat, Scan QR code
+- **User** (khusus admin): buat user, atur akses menu (Dashboard, Part & BOM, Riwayat) dan izin *Ubah data* (stok, part, impor Excel, BOM), nonaktifkan akun, reset password.
+  User baru wajib mengganti password saat login pertama. Admin tidak bisa menurunkan/menonaktifkan dirinya sendiri, dan harus selalu ada minimal satu admin aktif.
+  Perubahan hak akses berlaku otomatis di perangkat user (paling lambat ±30 detik atau saat aplikasi dibuka lagi).
+- **Riwayat**: semua aksi per user (stok masuk/keluar dengan stok akhir, part, impor, rak, BOM, user), per bulan.
+  Filter bulan, user, jenis aksi, dan kata kunci; ekspor ke Excel. Tetap tampil (data terakhir) saat offline.
+- **Scan QR code**: ikon kamera di kolom pencarian dan di isian *No item* pada form Part baru.
+  - Kamera otomatis zoom **3x** dan hanya area di dalam **kotak** yang dibaca. Tombol "Zoom 3×/1×" untuk beralih bila QR besar atau Anda terlalu dekat.
+  - Memakai zoom kamera asli bila perangkat mendukung (Android), sisanya zoom digital (iPhone/Safari).
+  - Bila browser punya `BarcodeDetector` (Chrome Android) dipakai lebih dulu; bila tidak, pembaca QR bawaan (`js/qr.js`) yang bekerja, termasuk di iPhone/Safari dan Firefox.
+  - Barcode 1D (Code128, EAN, dll.) hanya terbaca di browser yang punya `BarcodeDetector`. Pembaca 1D bawaan sudah dihapus.
+  - Tahan QR yang miring/berputar dan QR terbalik (terang di atas gelap). Ada isian "atau ketik kode" bila QR rusak.
+  - Scanner barcode fisik (USB/Bluetooth) juga bisa: klik kolom pencarian lalu pindai. Scanner biasanya mengetik kode + Enter.
+  - Kamera butuh HTTPS. GitHub Pages sudah HTTPS.
+  - Kode yang tidak ada di sistem menampilkan tombol "Tambah part dengan no item ini".
+
 ## Catatan penting
 - Setiap aksi langsung di-commit ke repo data. Tanda di kanan atas menunjukkan status sinkronisasi.
 - Offline: aksi masuk antrean dan terkirim otomatis saat online lagi.
-- Login/role di web statis bukan keamanan tingkat tinggi. Pengaman utamanya adalah token dan repo private.
+- Login/role di web statis bukan keamanan tingkat tinggi: siapa pun yang memegang token GitHub dapat mengubah data langsung di repo. Pengaman utamanya adalah token (fine-grained, hanya repo data) dan repo private. Jangan bagikan token ke orang yang tidak perlu; cabut token di GitHub bila perangkat hilang.
 - Baris 1 ada di paling atas rak. Jika di gudang Anda baris 1 = paling bawah, ubah `ROW1_ON_TOP` di `js/core.js`.
 - Kolom dan baris dibatasi 1–9 agar kode lokasi (mis. A13) tidak ambigu.
 
@@ -44,12 +75,13 @@ Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON 
 ```
 index.html  manifest.json  sw.js
 css/   themes.css  main.css
-js/    app.js  core.js  db.js  github.js  sync.js  store.js
-       ui.js  map.js  dashboard.js
-icons/
+js/    app.js  core.js  db.js  github.js  sync.js  store.js  ui.js
+       search.js  map.js  dashboard.js  forms.js
+       parts.js  bom.js  sheets.js  xlsx.js
+       users.js  report.js  scanner.js  qr.js
+icons/  templates/
 ```
-Data di repo private: `data/parts.json`, `racks.json`, `users.json`, `history-YYYY-MM.json`.
+Data di repo private: `data/parts.json`, `racks.json`, `users.json`, `bom.json`, `history-YYYY-MM.json`.
 
-## Tahap berikutnya
-- Tahap 2: menu Part & BOM, import/export Excel, template contoh.
-- Tahap 3: user management, laporan riwayat, scan barcode kamera.
+## Ide lanjutan (belum ada)
+- Notifikasi stok minimum, stok opname per rak, cetak label QR.
