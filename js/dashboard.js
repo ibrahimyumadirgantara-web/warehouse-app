@@ -5,6 +5,7 @@ import { matchParts, matchBoms, isExactBom } from './search.js';
 import { $, esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { createMap } from './map.js';
 import { openStock, openPartForm, useBom } from './forms.js';
+import { openBomEdit } from './bom.js';
 import { scanBarcode } from './scanner.js';
 
 const byNo = (a, b) => String(a.no).localeCompare(String(b.no), undefined, { numeric: true });
@@ -114,8 +115,8 @@ export function mountDashboard(root) {
   function renderBomMode(bom) {
     $('#count', root).textContent = `${bom.lines.length} part untuk ${bom.product_name}`;
     list.innerHTML = `<li class="bomhead">
-        <div class="bh-top"><button class="btn small" id="bback">‹ Hasil pencarian</button>
-          <div class="bh-title"><b>${esc(bom.product_name)}</b><span class="muted">${esc(bom.product_no)} · ${bom.lines.length} part</span></div></div>
+        <div class="bh-title"><b>${esc(bom.product_name)}</b><span class="muted">${esc(bom.product_no)} · ${bom.lines.length} part</span></div>
+        <div class="bh-top"><button class="btn small" id="bback">‹ Kembali</button>${canStock ? '<button class="btn small" id="bedit">Edit BOM</button>' : ''}</div>
         <div class="bh-ctl"><label class="bh-units">Jumlah produksi
             <span class="ustep"><button type="button" data-ustep="-1" aria-label="Kurangi jumlah">−</button><input id="bunits" type="number" inputmode="numeric" min="1" step="1" value="${units}"><button type="button" data-ustep="1" aria-label="Tambah jumlah">+</button></span></label>
           ${canStock ? '<button class="btn primary" id="bgo">Konfirmasi · potong stok</button>' : ''}</div>
@@ -208,6 +209,7 @@ export function mountDashboard(root) {
   list.addEventListener('click', (e) => {
     if (e.target.closest('#more')) { shown += 200; renderList(); return; }
     if (e.target.closest('#addq')) { openPartForm(null, { preset: { no: q }, onSaved: (no) => { setQuery(no); selected = no; refresh(); } }); return; }
+    if (e.target.closest('#bedit')) { if (curBom()) openBomEdit(curBom().id); return; }
     if (e.target.closest('#bback')) { activeBom = null; selected = null; refresh(); return; }
     const st = e.target.closest('[data-ustep]');
     if (st) {

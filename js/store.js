@@ -141,6 +141,35 @@ export async function saveBom(bom, newParts, fileName) {
   return { ok: true, replaced };
 }
 
+// Ubah BOM yang sudah ada: nama produk dan daftar part (tambah/hapus part, ubah qty per unit). No item produk tetap.
+// lines: [{ no, qty, name? }]
+export async function editBom(id, name, lines) {
+  const old = S.bom.find((b) => b.id === id);
+  if (!old) return { ok: false, error: 'BOM tidak ditemukan.' };
+  name = String(name || '').trim();
+  if (!name) return { ok: false, error: 'Nama produk wajib diisi.' };
+  if (!lines.length) return { ok: false, error: 'BOM minimal punya satu part.' };
+  const seen = new Set();
+  for (const l of lines) {
+    if (!Number.isInteger(l.qty) || l.qty < 1) return { ok: false, error: `Qty ${l.no} harus bilangan bulat, minimal 1.` };
+    if (seen.has(l.no)) return { ok: false, error: `Part ${l.no} muncul dua kali.` };
+    seen.add(l.no);
+  }
+  const before = new Map(old.lines.map((l) => [l.no, l.qty]));
+  const added = lines.filter((l) => !before.has(l.no)).length;
+  const removed = old.lines.filter((l) => !seen.has(l.no)).length;
+  const changed = lines.filter((l) => before.has(l.no) && before.get(l.no) !== l.qty).length;
+  const renamed = name !== old.product_name;
+  if (!added && !removed && !changed && !renamed) return { ok: true, unchanged: true };
+  const bom = { ...old, product_name: name, lines: lines.map((l) => ({ no: l.no, qty: l.qty, name: (S.parts.find((p) => p.no === l.no) || {}).name || l.name || '' })) };
+  const bits = [added && `${added} part ditambah`, removed && `${removed} part dihapus`, changed && `${changed} qty diubah`, renamed && 'nama diubah'].filter(Boolean);
+  await commit({
+    type: 'bom.upsert', bom, msg: `BOM ${bom.product_no} diubah`,
+    history: H('bom_edit', { no: bom.product_no, name: bom.product_name, delta: bom.lines.length, note: bits.join(', ') }),
+  });
+  return { ok: true, added, removed, changed };
+}
+
 export async function deleteBom(id) {
   const b = S.bom.find((x) => x.id === id);
   if (!b) return { ok: false, error: 'BOM tidak ditemukan.' };
@@ -201,11 +230,11 @@ export async function consumeBom(bomId, units) {
   const chk = bomCheck(bom, S.parts, units);
   if (chk.missing) return { ok: false, error: `${chk.missing} part belum ada di daftar Part. Tambahkan dulu.` };
   if (!chk.ok) return { ok: false, error: `Stok kurang untuk ${chk.short} part: ${chk.lines.filter((l) => l.lack > 0).slice(0, 3).map((l) => `${l.no} (kurang ${l.lack})`).join(', ')}${chk.short > 3 ? ', …' : ''}` };
-  const ts = new Date().toISOString(), note = `${units} × ${bom.product_name} (${bom.product_no})`;
+  const ts = new Date().toISOString(), note = `${units} unit · ${bom.product_no}`;
   const adjusts = [], histories = [], low = [];
   for (const l of chk.lines) {
     adjusts.push({ no: l.no, delta: -l.need });
-    histories.push(H('bom_use', { ts, no: l.no, name: l.part.name, delta: -l.need, after: l.stock - l.need, loc: codeOf(l.part), note }));
+    histories.push(H('bom_use', { ts, no: l.no, name: l.part.name, delta: -l.need, after: l.stock - l.need, loc: codeOf(l.part), note, product: bom.product_name, productNo: bom.product_no, units }));
     low.push(...crossedLow(l.part, l.stock, l.stock - l.need));
   }
   await commit({ type: 'stock.batch', adjusts, histories, msg: `Produksi ${units} × ${bom.product_no}` });

@@ -1,7 +1,8 @@
 // bom.js — tab BOM: daftar produk, detail kebutuhan vs stok, impor/ekspor Excel.
-import { S, saveBom, deleteBom } from './store.js';
+import { S, saveBom, deleteBom, editBom } from './store.js';
 import { can, isAdmin, bomCheck } from './core.js';
-import { useBom } from './forms.js';
+import { useBom, openPartForm } from './forms.js';
+import { matchParts } from './search.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parseBomSheets, bomsToSheets, bomTemplate } from './sheets.js';
 import { esc, icon, modal, toast, confirmDialog, pickFile, today, safeName } from './ui.js';
@@ -62,7 +63,7 @@ export function bomTab(acts, body) {
           <label style="width:150px">Jumlah produksi<input id="units" type="number" inputmode="numeric" min="1" step="1" value="1"></label>
           <p class="preview" id="sum" style="flex:1"></p></div>
         <div class="tblwrap"><table class="btbl"><thead><tr><th>No Item</th><th>Nama Part</th><th class="r">Butuh</th><th class="r">Stok</th><th>Lokasi</th><th class="r">Kurang</th></tr></thead><tbody id="rows"></tbody></table></div>`,
-      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button>${canEdit ? '<button class="btn primary" id="use">Potong stok</button>' : '<button class="btn primary" data-close>Tutup</button>'}`,
+      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}${canEdit ? '<button class="btn" id="edit">Edit BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button>${canEdit ? '<button class="btn primary" id="use">Potong stok</button>' : '<button class="btn primary" data-close>Tutup</button>'}`,
     });
     const units = m.$('#units');
     function paint() {
@@ -86,6 +87,8 @@ export function bomTab(acts, body) {
     units.addEventListener('input', paint);
     paint();
     m.$('#exp').onclick = () => downloadBytes(writeWorkbook(bomsToSheets([b], S.parts)), `bom-${safeName(b.product_no)}-${today()}.xlsx`);
+    const ed = m.$('#edit');
+    if (ed) ed.onclick = () => { m.close(); openBomEdit(b.id, () => openDetail(b.id)); };
     const use = m.$('#use');
     if (use) use.onclick = async () => {
       const u = Math.max(1, Math.floor(Number(units.value)) || 1);
@@ -134,4 +137,71 @@ export function bomTab(acts, body) {
 
   render();
   return { refresh: render, destroy() {} };
+}
+
+// ---------- Edit BOM: ubah nama produk, tambah/hapus part, ubah qty per unit ----------
+// onDone dipanggil setelah dialog ditutup (disimpan atau dibatalkan).
+export function openBomEdit(id, onDone) {
+  const src = S.bom.find((x) => x.id === id);
+  if (!src) return;
+  let lines = src.lines.map((l) => ({ ...l }));
+  const m = modal({
+    title: 'Edit BOM', wide: true, onClose: () => { if (onDone) onDone(); },
+    body: `<div class="form">
+        <label>Nama produk<input id="bname" value="${esc(src.product_name)}" autocomplete="off"></label>
+        <p class="muted" style="margin:0">No item produk: <b class="mono">${esc(src.product_no)}</b> (tidak bisa diubah)</p>
+        <label>Tambah part ke BOM<span class="inrow"><input id="badd" type="search" placeholder="Cari no item atau nama part…" autocomplete="off">
+          <button type="button" class="btn small" id="bnew">${icon('plus')}Part baru</button></span></label>
+        <div id="bres" class="bres" hidden></div>
+        <div class="tblwrap"><table class="btbl"><thead><tr><th>No Item</th><th>Nama Part</th><th class="r">Stok</th><th class="r">Qty / unit</th><th></th></tr></thead><tbody id="blines"></tbody></table></div>
+        <p class="err" id="berr" role="alert"></p></div>`,
+    footer: '<button class="btn" data-close>Batal</button><button class="btn primary" id="bsave">Simpan perubahan</button>',
+  });
+  const paint = () => {
+    m.$('#blines').innerHTML = lines.length ? lines.map((l, i) => {
+      const p = S.parts.find((x) => x.no === l.no);
+      return `<tr><td class="mono">${esc(l.no)}</td><td>${esc(p ? p.name : l.name || '')}${p ? '' : ' <span class="muted">(belum ada di Part)</span>'}</td>
+        <td class="r">${p ? Number(p.qty) || 0 : '–'}</td>
+        <td class="r"><input class="bqty" type="number" inputmode="numeric" min="1" step="1" value="${l.qty}" data-i="${i}" aria-label="Qty per unit ${esc(l.no)}"></td>
+        <td class="r"><button class="icon-btn" data-rm="${i}" aria-label="Hapus ${esc(l.no)} dari BOM">${icon('x')}</button></td></tr>`;
+    }).join('') : '<tr><td colspan="5" class="muted">BOM kosong. Tambahkan minimal satu part.</td></tr>';
+  };
+  paint();
+
+  const add = (no) => {
+    if (lines.some((l) => l.no === no)) return;
+    const p = S.parts.find((x) => x.no === no);
+    lines.push({ no, qty: 1, name: p ? p.name : '' });
+    m.$('#badd').value = ''; m.$('#bres').hidden = true;
+    paint();
+    const inputs = m.el.querySelectorAll('.bqty');
+    const last = inputs[inputs.length - 1];
+    if (last) { last.scrollIntoView({ block: 'nearest' }); last.focus(); last.select(); }
+  };
+  m.$('#badd').addEventListener('input', (e) => {
+    const q = e.target.value.trim(), box = m.$('#bres');
+    if (!q) { box.hidden = true; return; }
+    const have = new Set(lines.map((l) => l.no));
+    const hits = matchParts(S.parts, q).filter((p) => !have.has(p.no)).slice(0, 8);
+    box.hidden = false;
+    box.innerHTML = hits.length ? hits.map((p) => `<button type="button" class="bhit" data-add="${esc(p.no)}"><span><b>${esc(p.name)}</b><span class="muted mono"> ${esc(p.no)}</span></span><span class="loc">${esc(p.rack ? `${p.rack}${p.col}${p.row}` : '–')}</span></button>`).join('')
+      : `<div class="muted" style="padding:8px 10px">Tidak ada part cocok yang belum ada di BOM.</div>`;
+  });
+  m.el.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-add]');
+    if (a) { add(a.dataset.add); return; }
+    const r = e.target.closest('[data-rm]');
+    if (r) { lines.splice(Number(r.dataset.rm), 1); paint(); }
+  });
+  m.el.addEventListener('input', (e) => {
+    const q = e.target.closest('.bqty');
+    if (q) lines[Number(q.dataset.i)].qty = q.value === '' ? 0 : Number(q.value);
+  });
+  m.$('#bnew').onclick = () => openPartForm(null, { preset: { no: m.$('#badd').value.trim() }, onSaved: (no) => add(no) });
+  m.$('#bsave').onclick = async () => {
+    const r = await editBom(id, m.$('#bname').value, lines);
+    if (!r.ok) { m.$('#berr').textContent = r.error; return; }
+    m.close();
+    toast(r.unchanged ? 'Tidak ada perubahan' : 'BOM diperbarui', r.unchanged ? 'info' : 'ok');
+  };
 }

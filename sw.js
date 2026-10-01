@@ -1,5 +1,5 @@
 // Service worker: jaringan dulu, cache sebagai cadangan (aplikasi tetap terbuka saat offline).
-const V = 'swl-v5';
+const V = 'swl-v6';
 const SHELL = ['./', 'index.html', 'manifest.json', 'css/themes.css', 'css/main.css',
   'js/app.js', 'js/core.js', 'js/db.js', 'js/github.js', 'js/sync.js', 'js/store.js',
   'js/ui.js', 'js/map.js', 'js/dashboard.js', 'js/search.js', 'js/forms.js', 'js/parts.js', 'js/bom.js',

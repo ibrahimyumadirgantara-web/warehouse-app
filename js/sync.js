@@ -154,8 +154,11 @@ export async function loadHistory(month) {
   } catch (e) { error = e.message; offline = e.status === 0; }
   const seen = new Set(items.map((h) => h.id));
   for (const o of await db.getAll('queue')) {
-    const h = o.history;
-    if (h && h.ts.slice(0, 7) === month && !o.done.includes(path) && !seen.has(h.id)) { items = items.concat(h); seen.add(h.id); }
+    if (o.done.includes(path)) continue;
+    // Satu operasi bisa membawa banyak catatan riwayat (potong stok BOM, opname).
+    for (const h of o.histories || (o.history ? [o.history] : [])) {
+      if (h.ts.slice(0, 7) === month && !seen.has(h.id)) { items = items.concat(h); seen.add(h.id); }
+    }
   }
   return { items, error, offline };
 }

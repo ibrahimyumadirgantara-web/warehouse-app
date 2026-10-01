@@ -69,7 +69,9 @@ Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON 
   - Hasil pencarian memisahkan **Produk (BOM)** dan **Part**. Bila yang cocok hanya satu produk, seluruh part-nya langsung tampil, dan lokasinya berkedip di denah.
   - Isi jumlah produksi, lalu ketuk **Konfirmasi · potong stok**. Setelah dialog konfirmasi, stok semua part dipotong sesuai BOM × jumlah dalam satu operasi: semua berhasil atau tidak sama sekali.
   - Part yang kurang ditandai merah dan tombol dikunci. Part yang belum terdaftar di daftar Part juga memblokir pemotongan.
-  - Tombol **Potong stok** juga ada di detail BOM (Part & BOM → BOM). Setiap pemotongan tercatat di Riwayat sebagai "Produksi (BOM)" per part.
+  - Tombol **Potong stok** juga ada di detail BOM (Part & BOM → BOM). Setiap pemotongan tercatat di Riwayat per part; kolom Aksi berisi **nama produknya** dan catatannya "N unit · no item produk".
+  - **Edit BOM** (tombol di detail BOM dan di Dashboard saat produk dibuka): ubah nama produk, hapus part, ubah qty per unit, dan tambah part dengan mencari no item/nama (atau "Part baru" bila belum terdaftar). Tercatat di Riwayat sebagai "Ubah BOM".
+  - Perbandingan panel denah : daftar tetap 70 : 30 saat produk dibuka.
   - Mengetik nama part (mis. `baut`) tetap hanya menampilkan part.
 - **Notifikasi stok minimum**: isi *Stok minimum* di form part atau kolom **Stok Min** pada Excel (template Part sudah punya kolom ini; kosong = tidak diubah, 0 = tanpa batas).
   - Part dengan stok ≤ minimum: angka berwarna kuning, ada lencana merah di menu Part & BOM, dan toast saat login.
