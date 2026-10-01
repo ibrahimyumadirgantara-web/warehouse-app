@@ -1,9 +1,10 @@
 // sheets.js — logika murni: baca tabel Part/BOM dari baris Excel, validasi, dan susun sheet ekspor/template.
 
-export const BOM_HEADERS = ['No Item', 'Nama Part', 'Spesifikasi', 'Total Qty', 'Rak', 'Kolom', 'Baris'];
-export const PART_HEADERS = [...BOM_HEADERS, 'Stok Min'];
-const WIDTHS = [18, 30, 32, 12, 8, 8, 8];
-const PART_WIDTHS = [...WIDTHS, 10];
+// BOM hanya daftar part + qty per unit produk; lokasi diatur di data Part, jadi tidak ada kolom Rak/Kolom/Baris.
+export const BOM_HEADERS = ['No Item', 'Nama Part', 'Spesifikasi', 'Total Qty'];
+export const PART_HEADERS = [...BOM_HEADERS, 'Rak', 'Kolom', 'Baris', 'Stok Min'];
+const BOM_WIDTHS = [18, 30, 32, 12];
+const PART_WIDTHS = [...BOM_WIDTHS, 8, 8, 8, 10];
 
 const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const str = (v) => (v === null || v === undefined ? '' : typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(v)) : String(v).trim());
@@ -188,14 +189,14 @@ export function safeSheetName(name, used) {
 export function bomToSheet(bom, parts, name) {
   const map = new Map(parts.map((p) => [p.no, p]));
   return {
-    name, freeze: 3, widths: WIDTHS,
+    name, freeze: 3, widths: BOM_WIDTHS,
     rows: [
       [{ v: 'Nama Produk', s: 'label' }, bom.product_name, { v: 'No Item Produk', s: 'label' }, bom.product_no],
       [],
       H(),
       ...bom.lines.map((l) => {
         const p = map.get(l.no) || {};
-        return [l.no, p.name || l.name || '', p.spec || '', l.qty, p.rack || '', p.col ?? '', p.row ?? ''];
+        return [l.no, p.name || l.name || '', p.spec || '', l.qty];
       }),
     ],
   };
@@ -235,12 +236,12 @@ export function partTemplate() {
 export function bomTemplate() {
   return [
     {
-      name: 'BOM', freeze: 3, widths: WIDTHS,
+      name: 'BOM', freeze: 3, widths: BOM_WIDTHS,
       rows: [
         [{ v: 'Nama Produk', s: 'label' }, 'Mesin Pengemas X100', { v: 'No Item Produk', s: 'label' }, 'PRD-X100'],
         [],
         H(),
-        ['CONTOH-001', 'Baut M8 x 20', 'Baja galvanis, panjang 20 mm', 8, 'A', 1, 3],
+        ['CONTOH-001', 'Baut M8 x 20', 'Baja galvanis, panjang 20 mm', 8],
       ],
     },
     {
@@ -250,8 +251,9 @@ export function bomTemplate() {
         ['Baris 1 berisi Nama Produk dan No Item Produk. Ganti nilai contoh dengan produk Anda.'],
         ['Mulai baris 4, isi daftar part yang dipakai untuk membuat 1 unit produk. Baris contoh (CONTOH-) dilewati otomatis.'],
         ['Total Qty pada BOM = jumlah part yang dibutuhkan untuk 1 unit produk (bukan stok gudang).'],
-        ['Part yang sudah ada di sistem cukup diisi No Item dan Qty; data lain diambil dari daftar Part.'],
-        ['Part yang belum ada di sistem dibuat otomatis dengan stok 0 (Nama Part wajib diisi; Rak/Kolom/Baris opsional).'],
+        ['BOM hanya berisi daftar part dan qty. Lokasi (rak, kolom, baris) tidak diisi di sini; lokasi diambil dari data Part.'],
+        ['Part yang sudah ada di sistem cukup diisi No Item dan Total Qty; nama dan spesifikasi diambil dari daftar Part.'],
+        ['Part yang belum ada di sistem dibuat otomatis dengan stok 0 dan tanpa lokasi (Nama Part wajib diisi). Atur lokasinya nanti lewat Dashboard.'],
         ['Satu file boleh berisi banyak produk: buat satu sheet per produk dengan susunan yang sama.'],
         [NOTE('Sel yang diisi pengguna: baris 1 (nilai produk) dan semua baris di bawah header tabel.')],
       ],
