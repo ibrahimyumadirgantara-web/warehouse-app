@@ -1,7 +1,7 @@
 // bom.js — tab BOM: daftar produk, detail kebutuhan vs stok, impor/ekspor Excel.
 import { S, saveBom, deleteBom, editBom } from './store.js';
-import { can, isAdmin, bomCheck } from './core.js';
-import { useBom, openPartForm } from './forms.js';
+import { can, isAdmin, bomCheck, bomKind, KIND_TAG, inAsmOf } from './core.js';
+import { useBom, openPartForm, receiveBom } from './forms.js';
 import { matchParts } from './search.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parseBomSheets, bomsToSheets, bomTemplate } from './sheets.js';
@@ -35,8 +35,10 @@ export function bomTab(acts, body) {
     body.innerHTML = `<div class="tcount">${S.bom.length} produk</div><div class="bomgrid">${S.bom.map((b) => {
       const n = buildable(b);
       const info = n === null ? 'Ada part yang belum ada di daftar Part' : n > 0 ? `Stok cukup untuk ${n} unit` : 'Stok belum cukup untuk 1 unit';
-      return `<button class="bomcard" data-id="${esc(b.id)}"><b>${esc(b.product_name)}</b><span class="muted">${esc(b.product_no)} · ${b.lines.length} part</span>
-        <span class="${n ? 'okc' : 'badc'}">${info}</span></button>`;
+      const k = bomKind(b), out = S.parts.find((x) => x.no === b.product_no), asm = out ? inAsmOf(out) : 0;
+      return `<button class="bomcard" data-id="${esc(b.id)}"><b>${esc(b.product_name)}</b><span class="muted">${esc(b.product_no)} · ${b.lines.length} part · hasil <span class="ktag ${k}">${KIND_TAG[k]}</span></span>
+        <span class="${n ? 'okc' : 'badc'}">${info}</span>
+        <span class="muted">Hasil di gudang: ${out ? Number(out.qty) || 0 : 0}${asm ? ` · <b class="asmc">di assembly ${asm}</b>` : ''}</span></button>`;
     }).join('')}</div>`;
   }
 
@@ -58,12 +60,13 @@ export function bomTab(acts, body) {
     if (!b) return;
     const m = modal({
       title: b.product_name, wide: true,
-      body: `<p class="muted" style="margin-top:0">${esc(b.product_no)} · ${b.lines.length} part</p>
+      body: `<p class="muted" style="margin-top:0">${esc(b.product_no)} · ${b.lines.length} part · hasil <span class="ktag ${bomKind(b)}">${KIND_TAG[bomKind(b)]}</span></p>
+        <p class="bh-out" id="outline"></p>
         <div class="form" style="flex-direction:row;align-items:end;gap:12px;flex-wrap:wrap">
           <label style="width:150px">Jumlah produksi<input id="units" type="number" inputmode="numeric" min="1" step="1" value="1"></label>
           <p class="preview" id="sum" style="flex:1"></p></div>
         <div class="tblwrap"><table class="btbl"><thead><tr><th>No Item</th><th>Nama Part</th><th class="r">Butuh</th><th class="r">Stok</th><th>Lokasi</th><th class="r">Kurang</th></tr></thead><tbody id="rows"></tbody></table></div>`,
-      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}${canEdit ? '<button class="btn" id="edit">Edit BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button>${canEdit ? '<button class="btn primary" id="use">Potong stok</button>' : '<button class="btn primary" data-close>Tutup</button>'}`,
+      footer: `${canEdit && isAdmin(S.user) ? '<button class="btn danger" id="del">Hapus BOM</button>' : ''}${canEdit ? '<button class="btn" id="edit">Edit BOM</button>' : ''}<button class="btn" id="exp">${icon('download')}Ekspor Excel</button>${canEdit ? '<button class="btn" id="recv">Terima hasil</button><button class="btn primary" id="use">Kirim ke assembly</button>' : '<button class="btn primary" data-close>Tutup</button>'}`,
     });
     const units = m.$('#units');
     function paint() {
@@ -83,12 +86,16 @@ export function bomTab(acts, body) {
       if (n !== null && short) m.$('#sum').textContent += ` Stok sekarang cukup untuk ${n} unit.`;
       const use = m.$('#use');
       if (use) use.disabled = !bomCheck(b, S.parts, u).ok;
+      const out = S.parts.find((x) => x.no === b.product_no);
+      m.$('#outline').innerHTML = `Hasil ${KIND_TAG[bomKind(b)]} di gudang: <b>${out ? Number(out.qty) || 0 : 0}</b> · sedang di assembly: <b class="${out && inAsmOf(out) ? 'asmc' : ''}">${out ? inAsmOf(out) : 0}</b>`;
     }
     units.addEventListener('input', paint);
     paint();
     m.$('#exp').onclick = () => downloadBytes(writeWorkbook(bomsToSheets([b], S.parts)), `bom-${safeName(b.product_no)}-${today()}.xlsx`);
     const ed = m.$('#edit');
     if (ed) ed.onclick = () => { m.close(); openBomEdit(b.id, () => openDetail(b.id)); };
+    const recv = m.$('#recv');
+    if (recv) recv.onclick = async () => { m.close(); await receiveBom(b); };
     const use = m.$('#use');
     if (use) use.onclick = async () => {
       const u = Math.max(1, Math.floor(Number(units.value)) || 1);
@@ -116,7 +123,7 @@ export function bomTab(acts, body) {
     const m = modal({
       title: 'Pratinjau impor BOM', wide: true,
       body: `<p class="muted" style="margin-top:0">${esc(file.name)} · ${results.length} sheet</p>` + results.map((r) => r.ok
-        ? `<div class="bomprev"><b>${esc(r.bom.product_name)}</b> <span class="muted">${esc(r.bom.product_no)} · sheet “${esc(r.sheet)}”</span>
+        ? `<div class="bomprev"><b>${esc(r.bom.product_name)}</b> <span class="muted">${esc(r.bom.product_no)} · sheet “${esc(r.sheet)}”</span> <span class="ktag ${bomKind(r.bom)}">hasil ${KIND_TAG[bomKind(r.bom)]}</span>
             <div>${r.bom.lines.length} part${r.newParts.length ? `, <b>${r.newParts.length} part baru</b> dibuat dengan stok 0` : ''}</div>
             ${S.bom.some((b) => b.id === r.bom.id) ? '<div class="warnc">BOM dengan No Item Produk ini sudah ada dan akan diganti.</div>' : ''}
             ${errs(r.errors)}${errs(r.warnings)}${r.errors.length ? '<div class="muted">Baris bermasalah dilewati.</div>' : ''}</div>`
@@ -150,6 +157,7 @@ export function openBomEdit(id, onDone) {
     body: `<div class="form">
         <label>Nama produk<input id="bname" value="${esc(src.product_name)}" autocomplete="off"></label>
         <p class="muted" style="margin:0">No item produk: <b class="mono">${esc(src.product_no)}</b> (tidak bisa diubah)</p>
+        <label>Hasil BOM ini<select id="bkind"><option value="wip"${bomKind(src) === 'wip' ? ' selected' : ''}>WIP (setengah jadi) — kembali ke gudang, lalu dirakit lagi</option><option value="jadi"${bomKind(src) === 'jadi' ? ' selected' : ''}>Produk jadi — siap dijual</option></select></label>
         <label>Tambah part ke BOM<span class="inrow"><input id="badd" type="search" placeholder="Cari no item atau nama part…" autocomplete="off">
           <button type="button" class="btn small" id="bnew">${icon('plus')}Part baru</button></span></label>
         <div id="bres" class="bres" hidden></div>
@@ -199,7 +207,7 @@ export function openBomEdit(id, onDone) {
   });
   m.$('#bnew').onclick = () => openPartForm(null, { preset: { no: m.$('#badd').value.trim() }, onSaved: (no) => add(no) });
   m.$('#bsave').onclick = async () => {
-    const r = await editBom(id, m.$('#bname').value, lines);
+    const r = await editBom(id, m.$('#bname').value, lines, m.$('#bkind').value);
     if (!r.ok) { m.$('#berr').textContent = r.error; return; }
     m.close();
     toast(r.unchanged ? 'Tidak ada perubahan' : 'BOM diperbarui', r.unchanged ? 'info' : 'ok');

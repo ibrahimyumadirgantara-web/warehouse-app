@@ -29,6 +29,26 @@ export const minOf = (p) => Math.max(0, Math.floor(Number(p && p.min) || 0));
 export const isLow = (p) => minOf(p) > 0 && (Number(p.qty) || 0) <= minOf(p);
 export const lowParts = (parts) => parts.filter(isLow);
 
+// ---------- Jenis item: Part (komponen) / WIP (setengah jadi) / Produk jadi ----------
+// Item WIP & Produk jadi adalah hasil sebuah BOM: no itemnya = no item produk BOM-nya, dan punya stok + lokasi seperti part biasa.
+export const kindOf = (p) => (p && (p.kind === 'wip' || p.kind === 'jadi') ? p.kind : '');
+export const KIND_TAG = { wip: 'WIP', jadi: 'Jadi' };
+export const KIND_LABEL = { '': 'Part (komponen)', wip: 'WIP (setengah jadi)', jadi: 'Produk jadi' };
+export const bomKind = (b) => (b && b.kind === 'jadi' ? 'jadi' : 'wip'); // BOM lama tanpa jenis dianggap WIP
+// Jumlah unit hasil BOM yang sedang dikerjakan di area assembly (belum kembali ke gudang).
+export const inAsmOf = (p) => Math.max(0, Math.floor(Number(p && p.inAsm) || 0));
+
+// ---------- Status pergerakan stok ----------
+export const IN_REASONS = [['pembelian', 'Pembelian'], ['assembly', 'Dari proses assembly'], ['lain', 'Lainnya (retur / koreksi)']];
+export const OUT_REASONS = [['assembly', 'Ke proses assembly'], ['customer', 'Ke customer'], ['lain', 'Lainnya (rusak / koreksi)']];
+export const REASON_SHORT = {
+  in: { pembelian: 'Pembelian', assembly: 'Dari assembly', lain: 'Lainnya' },
+  out: { assembly: 'Ke assembly', customer: 'Ke customer', lain: 'Lainnya' },
+};
+// Arah & status sebuah entri riwayat. Entri lama tanpa status: pemakaian BOM dianggap "ke assembly".
+export const reasonDir = (h) => (h.action === 'stock_in' ? 'in' : h.action === 'stock_out' || h.action === 'bom_use' ? 'out' : '');
+export const reasonOf = (h) => h.reason || (h.action === 'bom_use' ? 'assembly' : '');
+
 // ---------- BOM: kebutuhan vs stok untuk `units` unit produk ----------
 export function bomCheck(bom, parts, units = 1) {
   const map = new Map(parts.map((p) => [p.no, p]));
@@ -101,12 +121,25 @@ export function targetsOf(op) {
   if (k === 'user') t.push(PATHS.users);
   if (k === 'bom') {
     t.push(PATHS.bom);
-    if (op.type === 'bom.upsert' && op.newParts && op.newParts.length) t.push(PATHS.parts);
+    if (op.type === 'bom.upsert' && ((op.newParts && op.newParts.length) || op.output)) t.push(PATHS.parts);
   }
   if (op.type === 'stock.batch' && op.rackOpname) t.push(PATHS.racks);
   if (op.history) t.push(historyPath(op.history.ts));
   if (op.histories && op.histories.length) t.push(historyPath(op.histories[0].ts));
   return t;
+}
+
+// Pastikan item hasil BOM ada di daftar part (no item = no item produk). output: { no, name, kind }
+function ensureOutput(items, o) {
+  let cur = items.find((x) => x.no === o.no);
+  if (!cur) {
+    cur = { no: o.no, name: o.name, spec: '', qty: 0, rack: '', col: null, row: null, kind: o.kind };
+    items.push(cur);
+  } else {
+    if (kindOf(cur)) cur.name = o.name; // sudah item hasil BOM: ikuti nama produk
+    cur.kind = o.kind;
+  }
+  return cur;
 }
 
 // Mengubah `items` di tempat. Stok memakai selisih (delta) agar dua user
@@ -121,16 +154,26 @@ export function applyOp(op, kind, items) {
     if (op.type === 'part.upsert') {
       const p = op.part;
       const cur = items.find((x) => x.no === p.no);
-      if (cur) Object.assign(cur, { name: p.name, spec: p.spec, rack: p.rack, col: p.col, row: p.row }, p.min !== undefined ? { min: p.min } : {});
+      if (cur) Object.assign(cur, { name: p.name, spec: p.spec, rack: p.rack, col: p.col, row: p.row }, p.min !== undefined ? { min: p.min } : {}, p.kind !== undefined ? { kind: p.kind } : {});
       else if (op.isNew) items.push({ ...p });
     } else if (op.type === 'stock.adjust') {
       const cur = items.find((x) => x.no === op.no);
-      if (cur) cur.qty = Math.max(0, (Number(cur.qty) || 0) + op.delta);
+      if (cur) {
+        cur.qty = Math.max(0, (Number(cur.qty) || 0) + op.delta);
+        // Hasil assembly (WIP / produk jadi) yang masuk gudang mengurangi jumlah yang masih di assembly.
+        if (kindOf(cur) && op.delta > 0 && op.reason === 'assembly') cur.inAsm = op.closeAsm ? 0 : Math.max(0, inAsmOf(cur) - op.delta);
+      }
     } else if (op.type === 'stock.batch') {
       for (const a of op.adjusts) {
         const cur = items.find((x) => x.no === a.no);
         if (cur) cur.qty = Math.max(0, (Number(cur.qty) || 0) + a.delta);
       }
+      if (op.asm) { // kirim ke assembly: hasilnya (WIP/produk jadi) ditandai "sedang di assembly"
+        const o = ensureOutput(items, op.asm);
+        o.inAsm = inAsmOf(o) + op.asm.units;
+      }
+    } else if (op.type === 'part.ensure') {
+      ensureOutput(items, op.output);
     } else if (op.type === 'part.delete') {
       const i = items.findIndex((x) => x.no === op.no);
       if (i >= 0) items.splice(i, 1);
@@ -141,9 +184,12 @@ export function applyOp(op, kind, items) {
         if (!cur) { const n = { ...r }; items.push(n); idx.set(n.no, n); }
         else if (op.update) Object.assign(cur, r);
       }
-    } else if (op.type === 'bom.upsert' && op.newParts) {
-      const have = new Set(items.map((x) => x.no));
-      for (const r of op.newParts) if (!have.has(r.no)) { items.push({ ...r, qty: 0 }); have.add(r.no); }
+    } else if (op.type === 'bom.upsert') {
+      if (op.newParts) {
+        const have = new Set(items.map((x) => x.no));
+        for (const r of op.newParts) if (!have.has(r.no)) { items.push({ ...r, qty: 0 }); have.add(r.no); }
+      }
+      if (op.output) ensureOutput(items, op.output);
     }
   } else if (kind === 'bom') {
     if (op.type === 'bom.upsert') {

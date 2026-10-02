@@ -23,6 +23,7 @@ const SYN = {
   min: ['stokmin', 'stokminimum', 'minstok', 'minimumstok', 'minqty', 'minimum', 'minstock', 'minimumstock', 'min'],
 };
 const PRODUCT_NAME = ['namaproduk', 'produk', 'productname', 'product'];
+const PRODUCT_KIND = ['jenishasil', 'hasil', 'jenisproduk', 'jenis', 'outputkind'];
 const PRODUCT_NO = ['noitemproduk', 'noproduk', 'kodeproduk', 'productno', 'nomorproduk', 'noitemproduct'];
 
 function headerMap(row) {
@@ -116,7 +117,7 @@ export function parsePartSheets(sheets, racks) {
 
 // ---------- BOM ----------
 function findMeta(rows) {
-  const meta = { name: '', no: '' };
+  const meta = { name: '', no: '', kind: undefined };
   for (let i = 0; i < Math.min(rows.length, 10); i++) {
     const r = rows[i] || [];
     for (let j = 0; j < r.length; j++) {
@@ -125,6 +126,7 @@ function findMeta(rows) {
       const val = () => { for (let x = j + 1; x < r.length; x++) if (str(r[x]) !== '') return str(r[x]); return ''; };
       if (!meta.name && PRODUCT_NAME.includes(k)) meta.name = val();
       else if (!meta.no && PRODUCT_NO.includes(k)) meta.no = val();
+      else if (meta.kind === undefined && PRODUCT_KIND.includes(k)) { const v = norm(val()); meta.kind = /^(jadi|produkjadi|fg|finished|finishedgood|barangjadi)$/.test(v) ? 'jadi' : 'wip'; }
     }
   }
   return meta;
@@ -162,7 +164,7 @@ export function parseBomSheets(sheets, racks, parts) {
     if (!lines.size) { res.error = 'Tidak ada baris part yang valid.'; continue; }
     res.ok = true;
     res.newParts = [...fresh.values()];
-    res.bom = { id: meta.no, product_no: meta.no, product_name: meta.name, lines: [...lines.values()] };
+    res.bom = { id: meta.no, product_no: meta.no, product_name: meta.name, kind: meta.kind || 'wip', lines: [...lines.values()] };
   }
   return results;
 }
@@ -191,7 +193,7 @@ export function bomToSheet(bom, parts, name) {
   return {
     name, freeze: 3, widths: BOM_WIDTHS,
     rows: [
-      [{ v: 'Nama Produk', s: 'label' }, bom.product_name, { v: 'No Item Produk', s: 'label' }, bom.product_no],
+      [{ v: 'Nama Produk', s: 'label' }, bom.product_name, { v: 'No Item Produk', s: 'label' }, bom.product_no, { v: 'Jenis Hasil', s: 'label' }, bom.kind === 'jadi' ? 'Jadi' : 'WIP'],
       [],
       H(),
       ...bom.lines.map((l) => {
@@ -238,7 +240,7 @@ export function bomTemplate() {
     {
       name: 'BOM', freeze: 3, widths: BOM_WIDTHS,
       rows: [
-        [{ v: 'Nama Produk', s: 'label' }, 'Mesin Pengemas X100', { v: 'No Item Produk', s: 'label' }, 'PRD-X100'],
+        [{ v: 'Nama Produk', s: 'label' }, 'Mesin Pengemas X100', { v: 'No Item Produk', s: 'label' }, 'PRD-X100', { v: 'Jenis Hasil', s: 'label' }, 'WIP'],
         [],
         H(),
         ['CONTOH-001', 'Baut M8 x 20', 'Baja galvanis, panjang 20 mm', 8],
@@ -249,6 +251,7 @@ export function bomTemplate() {
       rows: [
         [{ v: 'Petunjuk pengisian — BOM', s: 'label' }],
         ['Baris 1 berisi Nama Produk dan No Item Produk. Ganti nilai contoh dengan produk Anda.'],
+        ['Jenis Hasil (opsional): WIP = setengah jadi yang kembali ke gudang setelah assembly; Jadi = produk jadi siap dijual. Kosong dianggap WIP.'],
         ['Mulai baris 4, isi daftar part yang dipakai untuk membuat 1 unit produk. Baris contoh (CONTOH-) dilewati otomatis.'],
         ['Total Qty pada BOM = jumlah part yang dibutuhkan untuk 1 unit produk (bukan stok gudang).'],
         ['BOM hanya berisi daftar part dan qty. Lokasi (rak, kolom, baris) tidak diisi di sini; lokasi diambil dari data Part.'],

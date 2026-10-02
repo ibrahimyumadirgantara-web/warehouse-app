@@ -1,7 +1,7 @@
 // parts.js — menu "Part & BOM": tab Part (daftar, impor/ekspor Excel) dan tab BOM.
 import { S, onChange, importParts } from './store.js';
-import { can, isAdmin, isLow, minOf, lowParts } from './core.js';
-import { matchParts } from './search.js';
+import { can, isAdmin, isLow, minOf, lowParts, kindOf, KIND_TAG, inAsmOf } from './core.js';
+import { matchParts, inScope } from './search.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parsePartSheets, partsToSheet, partTemplate } from './sheets.js';
 import { $, esc, icon, modal, toast, pickFile, today } from './ui.js';
@@ -17,10 +17,11 @@ export function errorList(errors, max = 8) {
 }
 
 function partTab(acts, body) {
-  let filter = '', shown = 300, lowOnly = false;
+  let filter = '', shown = 300, lowOnly = false, kindF = 'all';
   const canEdit = can(S.user, 'stock');
   acts.innerHTML = `<div class="filter">${icon('search')}<input id="pfilter" type="search" placeholder="Filter part…" aria-label="Filter part" autocomplete="off"></div>
     ${canEdit ? `<button class="btn small" id="imp">${icon('upload')}Impor Excel</button>` : ''}
+    <select id="kindf" aria-label="Filter jenis item"><option value="all">Semua jenis</option><option value="part">Part (komponen)</option><option value="wip">WIP</option><option value="jadi">Produk jadi</option></select>
     <button class="btn small" id="lowf" aria-pressed="false"></button>
     <button class="btn small" id="exp">${icon('download')}Ekspor</button>
     ${canEdit ? `<button class="btn small" id="tpl">${icon('file')}Template</button>` : ''}`;
@@ -33,22 +34,24 @@ function partTab(acts, body) {
     lb.setAttribute('aria-pressed', lowOnly);
     let list = filter ? matchParts(S.parts, filter) : S.parts.slice().sort(byNo);
     if (lowOnly) list = list.filter(isLow);
+    if (kindF !== 'all') list = list.filter((p) => inScope(p, kindF));
     if (!S.parts.length) {
       body.innerHTML = `<div class="empty"><b>Belum ada part</b><span>${canEdit ? 'Unduh Template, isi datanya, lalu ketuk Impor Excel. Atau tambahkan satu per satu dari Dashboard.' : 'Minta admin mengisi data part.'}</span></div>`;
       return;
     }
-    body.innerHTML = `<div class="tcount" aria-live="polite">${filter ? `${list.length} dari ${S.parts.length} part` : `${S.parts.length} part`}</div>
+    body.innerHTML = `<div class="tcount" aria-live="polite">${filter || lowOnly || kindF !== 'all' ? `${list.length} dari ${S.parts.length} item` : `${S.parts.length} item`}</div>
       <div class="tbl"><div class="trow thead"><span>No Item</span><span>Nama Part</span><span class="hide-m">Spesifikasi</span><span>Lokasi</span><span class="r">Qty</span></div>
       ${list.slice(0, shown).map((p) => {
         const q = Number(p.qty) || 0;
         return `<div class="trow${canEdit ? ' click' : ''}" data-no="${esc(p.no)}"${canEdit ? ' tabindex="0" role="button"' : ''}>
-          <span class="mono">${esc(p.no)}</span><span class="tname">${esc(p.name)}</span><span class="hide-m muted tname">${esc(p.spec || '')}</span>
+          <span class="mono">${esc(p.no)}</span><span class="tname">${kindOf(p) ? `<span class="ktag ${kindOf(p)}">${KIND_TAG[kindOf(p)]}</span> ` : ''}${esc(p.name)}${kindOf(p) && inAsmOf(p) ? ` <b class="asmc">· di assembly ${inAsmOf(p)}</b>` : ''}</span><span class="hide-m muted tname">${esc(p.spec || '')}</span>
           <span>${p.rack ? `<span class="loc">${esc(p.rack)}${p.col}${p.row}</span>` : '<span class="muted">–</span>'}</span>
           <span class="qty r${q <= 0 ? ' zero' : isLow(p) ? ' low' : ''}"${isLow(p) ? ` title="Stok minimum ${minOf(p)}"` : ''}>${q}${minOf(p) ? `<small class="qmin">min ${minOf(p)}</small>` : ''}</span></div>`;
       }).join('')}
       ${list.length > shown ? `<div class="more"><button class="btn small" id="more">Tampilkan ${list.length - shown} lagi</button></div>` : ''}</div>`;
   }
 
+  acts.querySelector('#kindf').addEventListener('change', (e) => { kindF = e.target.value; shown = 300; render(); });
   acts.querySelector('#lowf').onclick = () => { lowOnly = !lowOnly; shown = 300; render(); };
   acts.querySelector('#pfilter').addEventListener('input', (e) => { filter = e.target.value.trim(); shown = 300; render(); });
   body.addEventListener('click', (e) => {

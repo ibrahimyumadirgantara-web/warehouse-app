@@ -1,5 +1,6 @@
 // report.js — riwayat aksi per user (dibaca dari data/history-YYYY-MM.json di GitHub).
 import { S } from './store.js';
+import { reasonDir, reasonOf, REASON_SHORT } from './core.js';
 import * as sync from './sync.js';
 import { writeWorkbook, downloadBytes } from './xlsx.js';
 import { $, esc, icon, toast } from './ui.js';
@@ -8,9 +9,14 @@ const LABEL = {
   stock_in: ['Stok masuk', 'in'], stock_out: ['Stok keluar', 'out'], part_add: ['Part baru', 'chg'], part_edit: ['Ubah part', 'chg'],
   part_delete: ['Hapus part', 'out'], import_parts: ['Impor part', 'chg'], bom_import: ['Impor BOM', 'chg'], bom_delete: ['Hapus BOM', 'out'],
   rack_add: ['Rak baru', 'chg'], rack_move: ['Geser rak', 'chg'], rack_edit: ['Ubah rak', 'chg'], rack_delete: ['Hapus rak', 'out'],
-  bom_use: ['Produksi', 'out'], bom_edit: ['Ubah BOM', 'chg'], opname_adjust: ['Opname: selisih', 'chg'], opname_done: ['Opname selesai', 'chg'],
+  bom_use: ['Produksi', 'out'], asm_send: ['Kirim assembly', 'chg'], bom_edit: ['Ubah BOM', 'chg'], opname_adjust: ['Opname: selisih', 'chg'], opname_done: ['Opname selesai', 'chg'],
   user_add: ['User baru', 'chg'], user_edit: ['Ubah user', 'chg'], user_password: ['Ganti password', 'chg'], user_reset: ['Reset password', 'chg'],
 };
+const STATUS_OPTS = [['', 'Semua status'], ['in:pembelian', 'Masuk · Pembelian'], ['in:assembly', 'Masuk · Dari assembly'], ['out:assembly', 'Keluar · Ke assembly'],
+  ['out:customer', 'Keluar · Ke customer'], ['in:lain', 'Masuk · Lainnya'], ['out:lain', 'Keluar · Lainnya'], ['none', 'Tanpa status (data lama)']];
+// Label status sebuah entri riwayat, mis. "Masuk · Pembelian".
+const statusText = (h) => { const d = reasonDir(h), r = reasonOf(h); return d && r ? `${d === 'in' ? 'Masuk' : 'Keluar'} · ${REASON_SHORT[d][r]}` : ''; };
+const statusMatch = (h, f) => !f || (f === 'none' ? (h.action === 'stock_in' || h.action === 'stock_out') && !reasonOf(h) : `${reasonDir(h)}:${reasonOf(h)}` === f);
 const GROUPS = [['', 'Semua aksi'], ['stock', 'Stok masuk/keluar'], ['part', 'Part & impor'], ['bom', 'BOM'], ['opname', 'Opname'], ['rack', 'Rak'], ['user', 'User']];
 const inGroup = (a, g) => !g || (g === 'stock' ? a.startsWith('stock_') : g === 'part' ? a.startsWith('part_') || a === 'import_parts' : a.startsWith(g + '_'));
 const monthNow = () => new Date().toISOString().slice(0, 7);
@@ -27,11 +33,12 @@ const isQty = (a) => a === 'stock_in' || a === 'stock_out' || a === 'bom_use' ||
 const change = (h) => (isQty(h.action) ? `${h.delta > 0 ? '+' : ''}${h.delta}` : h.note || '');
 
 export function mountReport(root) {
-  let month = monthNow(), months = [], data = { items: [], error: '', offline: false }, f = { user: '', group: '', q: '' }, loading = false, alive = true;
+  let month = monthNow(), months = [], data = { items: [], error: '', offline: false }, f = { user: '', group: '', status: '', q: '' }, loading = false, alive = true;
   root.innerHTML = `<section class="pv"><div class="pv-top">
       <select id="rmonth" aria-label="Bulan"></select>
       <select id="ruser" aria-label="Filter user"></select>
       <select id="rgroup" aria-label="Filter jenis aksi">${GROUPS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <select id="rstatus" aria-label="Filter status masuk/keluar">${STATUS_OPTS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
       <div class="filter"><input id="rq" type="search" placeholder="Cari no item / nama / catatan…" autocomplete="off" aria-label="Cari riwayat"></div>
       <button class="btn small" id="rexp">${icon('download')}Ekspor</button></div>
     <div class="pv-body panel" id="rbody"></div></section>`;
@@ -50,8 +57,8 @@ export function mountReport(root) {
 
   const filtered = () => {
     const q = f.q.toLowerCase();
-    return data.items.filter((h) => (!f.user || h.by === f.user) && inGroup(h.action, f.group) &&
-      (!q || `${h.no || ''} ${h.name || ''} ${h.note || ''} ${h.product || ''} ${h.loc || ''} ${userName(h.by)}`.toLowerCase().includes(q)))
+    return data.items.filter((h) => (!f.user || h.by === f.user) && inGroup(h.action, f.group) && statusMatch(h, f.status) &&
+      (!q || `${statusText(h)} ${h.no || ''} ${h.name || ''} ${h.note || ''} ${h.product || ''} ${h.loc || ''} ${userName(h.by)}`.toLowerCase().includes(q)))
       .sort((a, b) => (a.ts < b.ts ? 1 : -1));
   };
 
@@ -68,7 +75,7 @@ export function mountReport(root) {
         const lab = actLabel(h), kind = (LABEL[h.action] || [0, 'chg'])[1];
         const noteLine = isQty(h.action) && h.note ? `<span class="hnote">${esc(h.note)}</span>` : '';
         return `<div class="hrow"><span class="hwho"><b>${fmt(h.ts)}</b><span class="muted">${esc(userName(h.by))}</span></span>
-          <span><span class="act ${kind}">${esc(lab)}</span></span>
+          <span><span class="act ${kind}">${esc(lab)}</span>${statusText(h) ? `<span class="hstat">${esc(statusText(h))}</span>` : ''}</span>
           <span class="hitem"><b>${esc(h.no && h.no !== '-' ? h.no : '')}</b> <span class="muted">${h.name && h.name !== h.no ? esc(h.name) : ''}</span>${h.loc ? ` <span class="loc">${esc(h.loc)}</span>` : ''}${noteLine}</span>
           <span class="r hchg ${kind}">${esc(change(h))}</span><span class="r hide-m mono">${h.after === undefined || h.after === null ? '' : h.after}</span></div>`;
       }).join('') + (list.length > 500 ? `<div class="more muted">Menampilkan 500 dari ${list.length}. Persempit filter atau ekspor ke Excel.</div>` : '') + '</div>';
@@ -85,14 +92,15 @@ export function mountReport(root) {
   $('#rmonth', root).addEventListener('change', (e) => { month = e.target.value; load(); });
   $('#ruser', root).addEventListener('change', (e) => { f.user = e.target.value; render(); });
   $('#rgroup', root).addEventListener('change', (e) => { f.group = e.target.value; render(); });
+  $('#rstatus', root).addEventListener('change', (e) => { f.status = e.target.value; render(); });
   $('#rq', root).addEventListener('input', (e) => { f.q = e.target.value.trim(); render(); });
   $('#rexp', root).onclick = () => {
     const list = filtered();
     if (!list.length) return toast('Tidak ada data untuk diekspor.', 'warn');
-    const H = ['Waktu', 'User', 'Aksi', 'No Item', 'Nama', 'Perubahan', 'Stok Akhir', 'Lokasi', 'Catatan'].map((v) => ({ v, s: 'h' }));
-    const rows = list.map((h) => [new Date(h.ts).toLocaleString('id-ID', { hour12: false }), userName(h.by), actLabel(h), h.no || '', h.name || '',
+    const H = ['Waktu', 'User', 'Aksi', 'Status', 'No Item', 'Nama', 'Perubahan', 'Stok Akhir', 'Lokasi', 'Catatan'].map((v) => ({ v, s: 'h' }));
+    const rows = list.map((h) => [new Date(h.ts).toLocaleString('id-ID', { hour12: false }), userName(h.by), actLabel(h), statusText(h), h.no || '', h.name || '',
       isQty(h.action) ? h.delta : '', h.after ?? '', h.loc || '', h.note || '']);
-    downloadBytes(writeWorkbook([{ name: 'Riwayat', freeze: 1, widths: [20, 22, 16, 18, 30, 12, 12, 10, 40], rows: [H, ...rows] }]), `riwayat-${month}.xlsx`);
+    downloadBytes(writeWorkbook([{ name: 'Riwayat', freeze: 1, widths: [20, 22, 16, 22, 18, 30, 12, 12, 10, 40], rows: [H, ...rows] }]), `riwayat-${month}.xlsx`);
   };
 
   fillMonths(); fillUsers();

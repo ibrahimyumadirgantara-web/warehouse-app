@@ -1,5 +1,5 @@
 // search.js — pencarian part. Terpisah dari core.js agar mudah diganti/disetel.
-import { codeOf } from './core.js';
+import { codeOf, kindOf } from './core.js';
 
 // Aturan:
 //  1. Setiap kata pencarian harus cocok dengan AWAL sebuah kata di no item / nama / spesifikasi / kode lokasi.
@@ -64,3 +64,9 @@ export const isExactBom = (b, query) => {
   const q = String(query || '').trim().toLowerCase();
   return !!q && (String(b.product_no).toLowerCase() === q || String(b.product_name || '').toLowerCase() === q);
 };
+
+// ---------- Cakupan pencarian di Dashboard ----------
+// Semua = part + WIP + produk jadi + BOM (resep produk) sekaligus. BOM = resep produk; WIP / Jadi = stok hasil assembly di gudang.
+export const SCOPES = [['all', 'Semua'], ['part', 'Part'], ['bom', 'BOM'], ['wip', 'WIP'], ['jadi', 'Jadi']];
+export const inScope = (p, scope) => (scope === 'all' ? true : scope === 'part' ? !kindOf(p) : scope === 'wip' ? kindOf(p) === 'wip' : scope === 'jadi' ? kindOf(p) === 'jadi' : false);
+export const scopeHasBom = (scope) => scope === 'all' || scope === 'bom';

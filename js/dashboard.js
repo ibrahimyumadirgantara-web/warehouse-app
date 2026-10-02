@@ -1,10 +1,10 @@
 // dashboard.js — pencarian (part & produk BOM) + denah rak (70) + daftar hasil (30).
 import { S, onChange, saveRack, deleteRack } from './store.js';
-import { codeOf, can, isAdmin, nextRackId, findFreeSpot, MAX_DIM, bomCheck, isLow, minOf } from './core.js';
-import { matchParts, matchBoms, isExactBom } from './search.js';
+import { codeOf, can, isAdmin, nextRackId, findFreeSpot, MAX_DIM, bomCheck, isLow, minOf, kindOf, KIND_TAG, bomKind, inAsmOf } from './core.js';
+import { matchParts, matchBoms, isExactBom, SCOPES, inScope, scopeHasBom } from './search.js';
 import { $, esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { createMap } from './map.js';
-import { openStock, openPartForm, useBom } from './forms.js';
+import { openStock, openPartForm, useBom, receiveBom } from './forms.js';
 import { openBomEdit } from './bom.js';
 import { scanBarcode } from './scanner.js';
 
@@ -15,12 +15,15 @@ export function mountDashboard(root) {
   let q = '', selected = null, edit = false, shown = 200, timer = null;
   let activeBom = null, units = 1, lowOnly = false; // mode produk: tampilkan semua part sebuah BOM
   const admin = isAdmin(S.user), canStock = can(S.user, 'stock');
+  let scope = SCOPES.some(([k]) => k === localStorage.getItem('swl.scope')) ? localStorage.getItem('swl.scope') : 'all'; // cakupan pencarian
+  const PLACEHOLDER = { all: 'Cari part, WIP, produk, atau lokasi (mis. A13)', part: 'Cari part (komponen) atau lokasi', bom: 'Cari produk / BOM', wip: 'Cari WIP (setengah jadi)', jadi: 'Cari produk jadi' };
 
   root.innerHTML = `<section class="dash">
     <div class="panel searchbar">${icon('search')}
       <input id="q" type="search" placeholder="Cari part, produk, atau lokasi (mis. A13)" autocomplete="off" enterkeyhint="search" aria-label="Cari part atau produk">
       <button class="icon-btn" id="qclear" aria-label="Hapus pencarian" hidden>${icon('x')}</button>
       <button class="icon-btn" id="scan" aria-label="Pindai QR code dengan kamera">${icon('camera')}</button>
+      <div class="scopebar" role="group" aria-label="Cari di">${SCOPES.map(([k, l]) => `<button type="button" data-scope="${k}" aria-pressed="${k === scope}">${l}</button>`).join('')}</div>
     </div>
     <div class="split">
       <div class="panel map-panel">
@@ -55,9 +58,9 @@ export function mountDashboard(root) {
     q = v;
     if (!fromInput) input.value = v;
     selected = null; shown = 200; activeBom = null; units = 1;
-    if (q) {
+    if (q && scopeHasBom(scope)) {
       const hits = matchBoms(S.bom, q);
-      if (hits.length === 1 && (isExactBom(hits[0], q) || !matchParts(S.parts, q).length)) activeBom = hits[0].id;
+      if (hits.length === 1 && (isExactBom(hits[0], q) || !matchParts(S.parts, q).filter((p) => inScope(p, scope)).length)) activeBom = hits[0].id;
     }
     refresh();
   }
@@ -65,9 +68,10 @@ export function mountDashboard(root) {
 
   // ---------- Render ----------
   const results = () => {
-    const all = q ? matchParts(S.parts, q) : S.parts.slice().sort(byNo);
+    const all = (q ? matchParts(S.parts, q) : S.parts.slice().sort(byNo)).filter((p) => inScope(p, scope));
     return lowOnly ? all.filter(isLow) : all;
   };
+  const bomHits = () => (scopeHasBom(scope) && !lowOnly ? (q ? matchBoms(S.bom, q) : scope === 'bom' ? S.bom.slice() : []) : []);
 
   function hitCodes() {
     const set = new Set();
@@ -87,20 +91,20 @@ export function mountDashboard(root) {
   }
 
   function row(p) {
-    const qty = Number(p.qty) || 0, loc = codeOf(p), low = qty > 0 && isLow(p);
+    const qty = Number(p.qty) || 0, loc = codeOf(p), low = qty > 0 && isLow(p), k = kindOf(p), asm = k ? inAsmOf(p) : 0;
     return `<li class="row${p.no === selected ? ' sel' : ''}" data-no="${esc(p.no)}" tabindex="0" role="button" aria-pressed="${p.no === selected}">
-      <div class="row-main"><span class="row-name">${esc(p.name)}</span><span class="row-meta">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''}${low ? ` · <b class="warnc">stok rendah (min ${minOf(p)})</b>` : ''}</span></div>
+      <div class="row-main"><span class="row-name">${k ? `<span class="ktag ${k}">${KIND_TAG[k]}</span> ` : ''}${esc(p.name)}</span><span class="row-meta">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''}${asm ? ` · <b class="asmc">di assembly ${asm}</b>` : ''}${low ? ` · <b class="warnc">stok rendah (min ${minOf(p)})</b>` : ''}</span></div>
       <span class="loc">${loc || '–'}</span><span class="qty${qty <= 0 ? ' zero' : low ? ' low' : ''}"${isLow(p) ? ` title="Stok minimum ${minOf(p)}"` : ''}>${qty}</span>
       ${canStock ? `<button class="icon-btn" data-act="stock" aria-label="Ubah stok ${esc(p.name)}">${icon('swap')}</button>` : '<span></span>'}</li>`;
   }
 
   function prodCard(b) {
-    const chk = bomCheck(b, S.parts, 1);
-    const info = chk.missing ? 'ada part belum terdaftar' : chk.ok ? 'stok cukup' : `${chk.short} part kurang`;
+    const chk = bomCheck(b, S.parts, 1), k = bomKind(b), out = S.parts.find((x) => x.no === b.product_no), asm = out ? inAsmOf(out) : 0;
+    const info = chk.missing ? 'ada part belum terdaftar' : chk.ok ? 'stok part cukup' : `${chk.short} part kurang`;
     return `<li class="row prodhit" data-bom="${esc(b.id)}" tabindex="0" role="button" aria-label="Lihat part produk ${esc(b.product_name)}">
       <div class="row-main"><span class="row-name">${esc(b.product_name)}</span>
-        <span class="row-meta">${esc(b.product_no)} · ${b.lines.length} part · <span class="${chk.ok ? 'okc' : 'badc'}">${info}</span></span></div>
-      <span class="ptag">Produk</span><span class="chev" aria-hidden="true">›</span><span></span></li>`;
+        <span class="row-meta">${esc(b.product_no)} · ${b.lines.length} part · <span class="${chk.ok ? 'okc' : 'badc'}">${info}</span> · hasil <span class="ktag ${k}">${KIND_TAG[k]}</span> stok ${out ? Number(out.qty) || 0 : 0}${asm ? ` · <b class="asmc">di assembly ${asm}</b>` : ''}</span></div>
+      <span class="ptag">BOM</span><span class="chev" aria-hidden="true">›</span><span></span></li>`;
   }
 
   function brow(l) {
@@ -113,17 +117,19 @@ export function mountDashboard(root) {
   }
 
   function renderBomMode(bom) {
+    const k = bomKind(bom);
     $('#count', root).textContent = `${bom.lines.length} part untuk ${bom.product_name}`;
     list.innerHTML = `<li class="bomhead">
-        <div class="bh-title"><b>${esc(bom.product_name)}</b><span class="muted">${esc(bom.product_no)} · ${bom.lines.length} part</span></div>
-        <div class="bh-top"><button class="btn small" id="bback">‹ Kembali</button>${canStock ? '<button class="btn small" id="bedit">Edit BOM</button>' : ''}</div>
+        <div class="bh-title"><b>${esc(bom.product_name)}</b><span class="muted">${esc(bom.product_no)} · ${bom.lines.length} part · hasil <span class="ktag ${k}">${KIND_TAG[k]}</span></span></div>
+        <div class="bh-top"><button class="btn small" id="bback">‹ Kembali</button>${canStock ? '<button class="btn small" id="bedit">Edit BOM</button><button class="btn small" id="brecv">Terima hasil</button>' : ''}</div>
+        <p class="bh-out" id="bout"></p>
         <div class="bh-ctl"><label class="bh-units">Jumlah produksi
             <span class="ustep"><button type="button" data-ustep="-1" aria-label="Kurangi jumlah">−</button><input id="bunits" type="number" inputmode="numeric" min="1" step="1" value="${units}"><button type="button" data-ustep="1" aria-label="Tambah jumlah">+</button></span></label>
-          ${canStock ? '<button class="btn primary" id="bgo">Konfirmasi · potong stok</button>' : ''}</div>
+          ${canStock ? '<button class="btn primary" id="bgo">Kirim ke assembly</button>' : ''}</div>
         <p class="preview" id="bsum" role="status"></p>
-        ${canStock ? '' : '<p class="muted bh-note">Hanya user dengan izin “ubah data” yang dapat memotong stok.</p>'}
+        ${canStock ? '' : '<p class="muted bh-note">Hanya user dengan izin “ubah data” yang dapat mengirim ke assembly.</p>'}
       </li>
-      <li class="bcap" aria-hidden="true"><span>Part</span><span>Lokasi</span><span>Potong</span><span></span></li>`;
+      <li class="bcap" aria-hidden="true"><span>Part</span><span>Lokasi</span><span>Kirim</span><span></span></li>`;
     paintBom();
   }
 
@@ -138,29 +144,38 @@ export function mountDashboard(root) {
     const total = chk.lines.reduce((a, l) => a + l.need, 0);
     let msg, cls = 'preview ';
     if (!valid) { msg = 'Jumlah produksi minimal 1.'; cls += 'badc'; }
-    else if (chk.missing) { msg = `${chk.missing} part belum ada di daftar Part. Tambahkan dulu sebelum memotong stok.`; cls += 'badc'; }
-    else if (!chk.ok) { msg = `Stok kurang untuk ${chk.short} part (ditandai merah). Stok tidak bisa dipotong.`; cls += 'badc'; }
-    else { msg = `Siap dipotong: ${chk.lines.length} part, total ${total} pcs untuk ${units} unit.`; cls += 'okc'; }
+    else if (chk.missing) { msg = `${chk.missing} part belum ada di daftar Part. Tambahkan dulu sebelum mengirim ke assembly.`; cls += 'badc'; }
+    else if (!chk.ok) { msg = `Stok kurang untuk ${chk.short} part (ditandai merah). Tidak bisa dikirim ke assembly.`; cls += 'badc'; }
+    else { msg = `Siap dikirim ke assembly: ${chk.lines.length} part, total ${total} pcs untuk ${units} unit.`; cls += 'okc'; }
     const sum = $('#bsum', list);
     sum.textContent = msg; sum.className = cls;
     const go = $('#bgo', list);
     if (go) go.disabled = !valid || !chk.ok;
+    const out = S.parts.find((x) => x.no === bom.product_no), kk = bomKind(bom);
+    $('#bout', list).innerHTML = `Hasil ${KIND_TAG[kk]} di gudang: <b>${out ? Number(out.qty) || 0 : 0}</b> · sedang di assembly: <b class="${out && inAsmOf(out) ? 'asmc' : ''}">${out ? inAsmOf(out) : 0}</b>`;
   }
 
   function renderList() {
     const bom = curBom();
     if (bom) { renderBomMode(bom); return; }
-    const res = results(), boms = q && !lowOnly ? matchBoms(S.bom, q) : [];
-    $('#count', root).textContent = q ? `${boms.length ? `${boms.length} produk · ` : ''}${res.length} part ditemukan` : `${S.parts.length} part`;
+    const res = results(), boms = bomHits();
+    const unit = { all: 'part', part: 'part', wip: 'WIP', jadi: 'produk jadi' }[scope];
+    const bits = [];
+    if (boms.length) bits.push(`${boms.length} BOM`);
+    if (scope !== 'bom') bits.push(`${res.length} ${unit}${q ? ' ditemukan' : ''}`);
+    $('#count', root).textContent = bits.join(' · ') || '0 BOM';
+    const empty = { part: 'Belum ada part (komponen).', bom: 'Belum ada BOM. Impor lewat Part & BOM → BOM.', wip: 'Belum ada WIP. Item WIP muncul saat BOM dikirim ke assembly, atau ubah Jenis sebuah item menjadi WIP.', jadi: 'Belum ada produk jadi. Atur hasil sebuah BOM menjadi “Produk jadi” lewat Edit BOM.' };
     if (!S.parts.length && !S.bom.length) {
       list.innerHTML = `<li class="empty"><b>Belum ada part</b><span>${canStock ? 'Ketuk “Part baru” untuk menambahkan part pertama.' : 'Minta admin menambahkan part.'}</span></li>`;
     } else if (lowOnly && !res.length) {
       list.innerHTML = '<li class="empty"><b>Tidak ada part dengan stok rendah</b><span>Semua stok di atas batas minimum.</span></li>';
     } else if (!res.length && !boms.length) {
-      list.innerHTML = `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama part atau produk, atau kode lokasi seperti A13.</span>
-        ${canStock ? '<button class="btn small" id="addq" style="align-self:flex-start;margin-top:6px">Tambah part dengan no item ini</button>' : ''}</li>`;
+      list.innerHTML = q
+        ? `<li class="empty"><b>Tidak ada hasil untuk “${esc(q)}”</b><span>Coba no item, nama, atau kode lokasi seperti A13.${scope !== 'all' ? ' Atau ganti cakupan ke Semua.' : ''}</span>
+        ${canStock && scope !== 'bom' ? '<button class="btn small" id="addq" style="align-self:flex-start;margin-top:6px">Tambah part dengan no item ini</button>' : ''}</li>`
+        : `<li class="empty"><b>Kosong</b><span>${esc(empty[scope] || '')}</span></li>`;
     } else {
-      list.innerHTML = (boms.length ? `<li class="seclabel">Produk (BOM)</li>${boms.slice(0, 20).map(prodCard).join('')}${res.length ? '<li class="seclabel">Part</li>' : ''}` : '') +
+      list.innerHTML = (boms.length ? `<li class="seclabel">${scope === 'bom' ? 'BOM (resep produk)' : 'Produk (BOM)'}</li>${boms.slice(0, 50).map(prodCard).join('')}${res.length ? `<li class="seclabel">${scope === 'all' ? 'Stok di gudang' : { part: 'Part', wip: 'WIP', jadi: 'Produk jadi' }[scope]}</li>` : ''}` : '') +
         res.slice(0, shown).map(row).join('') +
         (res.length > shown ? `<li class="more"><button class="btn small" id="more">Tampilkan ${res.length - shown} lagi</button></li>` : '');
     }
@@ -177,6 +192,8 @@ export function mountDashboard(root) {
     lb.textContent = lowOnly ? `Stok rendah · ${nLow} ✕` : `⚠ ${nLow} stok rendah`;
     lb.classList.toggle('primary', lowOnly);
     $('#qclear', root).hidden = !q;
+    root.querySelectorAll('[data-scope]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.scope === scope));
+    input.placeholder = PLACEHOLDER[scope];
     renderMap(); renderList();
   }
 
@@ -197,6 +214,14 @@ export function mountDashboard(root) {
     if (!exact && !matchParts(S.parts, code).length && !matchBoms(S.bom, code).length) toast(`Kode ${code} tidak ditemukan.`, 'warn');
   };
 
+  $('.scopebar', root).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-scope]');
+    if (!b || b.dataset.scope === scope) return;
+    scope = b.dataset.scope;
+    localStorage.setItem('swl.scope', scope);
+    setQuery(q);
+  });
+
   $('#lowbtn', root).onclick = () => { lowOnly = !lowOnly; selected = null; shown = 200; refresh(); };
 
   function pick(li) {
@@ -216,6 +241,7 @@ export function mountDashboard(root) {
       units = Math.max(1, (Number.isInteger(units) ? units : 0) + Number(st.dataset.ustep));
       $('#bunits', list).value = units; paintBom(); return;
     }
+    if (e.target.closest('#brecv')) { if (curBom()) receiveBom(curBom()); return; }
     if (e.target.closest('#bgo')) {
       const bom = curBom();
       if (bom) useBom(bom, units).then((ok) => { if (ok) refresh(); });

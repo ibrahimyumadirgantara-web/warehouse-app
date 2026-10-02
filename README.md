@@ -1,4 +1,4 @@
-# Smart Warehouse — Lengkap (Tahap 1–4)
+# Smart Warehouse — Lengkap (Tahap 1–5)
 
 Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON di repo GitHub private.
 
@@ -84,6 +84,28 @@ Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON 
   - Tinjau selisih lalu simpan: stok sistem diganti menjadi hitungan fisik. Riwayat mencatat tiap selisih dan ringkasan opname. Kartu rak menampilkan opname terakhir (kapan dan oleh siapa).
   - Hitungan didasarkan pada selisih, jadi perubahan stok oleh user lain saat Anda menghitung tidak saling menimpa.
 
+## Tahap 5: Status masuk/keluar, assembly, WIP
+Alur: **Part → (keluar ke assembly) → dikerjakan di assembly → WIP kembali ke gudang → dirakit lagi → produk jadi → dijual ke customer.**
+
+- **Status setiap barang masuk/keluar** (wajib dipilih di dialog *Ubah stok*; tombol Simpan terkunci sebelum dipilih):
+  - **Masuk**: Pembelian · Dari proses assembly · Lainnya (retur / koreksi, wajib isi alasan)
+  - **Keluar**: Ke proses assembly · Ke customer · Lainnya (rusak / koreksi, wajib isi alasan)
+  - Kolom catatan menyesuaikan status: supplier / no PO, no SPK, customer / no DO.
+  - Riwayat menampilkan status di bawah nama aksi, ada filter **Status** (mis. Keluar · Ke customer), dan kolom *Status* ikut di ekspor Excel.
+    Data lama tanpa status ditampilkan kosong (filter "Tanpa status"); pemakaian BOM lama dianggap "Ke assembly".
+- **Jenis item**: *Part (komponen)*, *WIP (setengah jadi)*, *Produk jadi*. Diatur di form part (kolom Jenis) atau otomatis dari BOM.
+- **Hasil BOM**: tiap BOM punya jenis hasil **WIP** atau **Produk jadi** (Edit BOM → *Hasil BOM ini*, atau sel `Jenis Hasil` di baris 1 Excel BOM; kosong = WIP).
+  Item hasil dibuat otomatis dengan no item = no item produk BOM, stok 0, dan bisa diberi lokasi rak. BOM produk jadi boleh berisi WIP + part biasa.
+- **Kirim ke assembly** (tombol di mode produk Dashboard dan di detail BOM; dulu bernama "Potong stok"): stok semua part dipotong dengan status *Ke proses assembly*,
+  hasilnya dicatat **sedang di assembly** (jumlah unit tampil di daftar, kartu BOM, dan Part & BOM).
+- **Terima hasil**: tombol di mode produk / detail BOM membuka dialog stok masuk berstatus *Dari proses assembly*, jumlah terisi otomatis sebanyak yang masih di assembly,
+  dan bisa langsung memilih rak untuk item yang belum punya lokasi. Terima sebagian diperbolehkan (sisa tetap tercatat di assembly);
+  centang *Tutup sisa di assembly* bila sisanya tidak akan kembali. Tombol *Terima semua* ada di dialog stok item WIP/Jadi.
+- **Pencarian Dashboard**: pilihan **Semua · Part · BOM · WIP · Jadi** di samping kolom pencarian (pilihan diingat).
+  *Semua* menampilkan BOM (resep) dan stok part/WIP/produk jadi sekaligus; *Part* hanya komponen; *WIP* hanya setengah jadi yang sudah kembali ke gudang; *BOM* hanya resep produk.
+  Tab Part punya filter jenis yang sama.
+- Perubahan data memakai selisih (delta) seperti sebelumnya, jadi dua perangkat yang bekerja bersamaan tidak saling menimpa, termasuk jumlah "di assembly".
+
 ## Catatan penting
 - Setiap aksi langsung di-commit ke repo data. Tanda di kanan atas menunjukkan status sinkronisasi.
 - Offline: aksi masuk antrean dan terkirim otomatis saat online lagi.
@@ -104,4 +126,4 @@ icons/  templates/
 Data di repo private: `data/parts.json`, `racks.json`, `users.json`, `bom.json`, `history-YYYY-MM.json`.
 
 ## Ide lanjutan (belum ada)
-- Cetak label QR per part/rak, laporan stok rendah ke Excel, notifikasi di luar aplikasi (email/WhatsApp).
+- Daftar surat perintah kerja (SPK) assembly dengan nomor dan batas waktu, cetak label QR per part/rak, laporan stok rendah ke Excel, notifikasi di luar aplikasi (email/WhatsApp).
