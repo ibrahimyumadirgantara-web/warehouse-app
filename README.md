@@ -1,4 +1,4 @@
-# Smart Warehouse — Lengkap (Tahap 1–5)
+# Smart Warehouse — Lengkap (Tahap 1–6)
 
 Aplikasi web statis (HTML/CSS/JS + IndexedDB + PWA). Data disimpan sebagai JSON di repo GitHub private.
 
@@ -105,6 +105,24 @@ Alur: **Part → (keluar ke assembly) → dikerjakan di assembly → WIP kembali
   *Semua* menampilkan BOM (resep) dan stok part/WIP/produk jadi sekaligus; *Part* hanya komponen; *WIP* hanya setengah jadi yang sudah kembali ke gudang; *BOM* hanya resep produk.
   Tab Part punya filter jenis yang sama.
 - Perubahan data memakai selisih (delta) seperti sebelumnya, jadi dua perangkat yang bekerja bersamaan tidak saling menimpa, termasuk jumlah "di assembly".
+
+## Tahap 6: Alur assembly yang konsisten + detail item + traceability
+Alur: **Part → Gudang → Assembly → WIP → Gudang WIP → Assembly lanjutan → Produk jadi → Customer.**
+
+- **Terima hasil assembly dibatasi**: jumlah yang diterima tidak boleh melebihi yang masih di assembly (mis. di assembly 100, sudah kembali 30 → maksimal 70).
+  Item tanpa produksi berjalan tidak bisa menerima. Dicatat di riwayat sebagai **Terima assembly** (`ASSEMBLY_RETURN`, aksi `asm_return`).
+- Status **Dari proses assembly** hanya untuk WIP / Produk jadi. Retur part biasa memakai **Lainnya** (alasan wajib).
+- **WIP kirim lagi ke assembly**: *Keluar → Ke proses assembly* pada item WIP/Jadi mengurangi stok gudang dan **menambah di assembly**; diterima kembali lewat *Dari proses assembly*.
+- **Status inventory** (diturunkan, tidak disimpan): Part `AVAILABLE`/`HABIS`, WIP `WIP`, produk jadi `FINISHED_GOOD`, tidak ada stok tapi masih di assembly `IN_ASSEMBLY`.
+  Di riwayat, status setelah transaksi: keluar ke customer `SOLD`, ke assembly `IN_ASSEMBLY`, masuk `AVAILABLE`/`WIP`/`FINISHED_GOOD`. Jumlah **terjual total** tercatat per item (delta, aman multi-perangkat).
+- **Detail item** (ikon ⓘ di tiap baris, atau tombol *Detail* di dialog stok): Kode, Nama, Jenis, Qty, Status, Lokasi, Sedang assembly, terjual, stok minimum,
+  pohon **Tersusun dari** (produk jadi → WIP → part, jumlah per 1 unit), **Dipakai di BOM**, dan **Riwayat item** 3 bulan terakhir.
+- **Riwayat** kini memuat Jenis, Status, Status Inventory, **Asal → Tujuan** (mis. `A11 → ASSEMBLY`, `ASSEMBLY → B21`, `B21 → CUSTOMER`) dan nomor **run** produksi.
+  Entri lama tanpa status tetap tampil (asal/tujuan diturunkan dari aksi + status + lokasi). Ekspor Excel ikut kolom baru.
+- **Traceability**: setiap *Kirim ke assembly* mencatat `run` yang sama pada ringkasan dan semua bahan yang dipakai, plus salinan resep saat itu (`bomLines`), jadi asal material tetap terbaca walau BOM diubah kemudian.
+- **Validasi tambahan**: jenis item hasil BOM mengikuti BOM (tidak bisa diubah jadi Part); item hasil BOM atau yang masih di assembly tidak bisa dihapus; BOM yang memakai dirinya sendiri (langsung/lewat WIP lain) ditolak.
+- Scan QR menemukan Part, WIP, dan Produk jadi; bila item di luar cakupan pencarian aktif, cakupan otomatis pindah ke *Semua*.
+- Data lama tetap aman: `kind` kosong = Part, BOM tanpa `kind` = WIP, riwayat tanpa status tetap tampil. Tidak ada migrasi data.
 
 ## Catatan penting
 - Setiap aksi langsung di-commit ke repo data. Tanda di kanan atas menunjukkan status sinkronisasi.

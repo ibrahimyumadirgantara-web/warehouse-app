@@ -1,6 +1,8 @@
 // forms.js — dialog bersama: ubah stok dan tambah/edit/hapus part (dipakai Dashboard dan Part & BOM).
 import { S, adjustStock, savePart, deletePart, consumeBom, ensureBomOutput } from './store.js';
-import { codeOf, can, isAdmin, bomCheck, kindOf, KIND_TAG, bomKind, inAsmOf, IN_REASONS, OUT_REASONS } from './core.js';
+import { codeOf, can, isAdmin, bomCheck, kindOf, KIND_TAG, KIND_LABEL, bomKind, inAsmOf, inReasonsFor, OUT_REASONS, invStatus, STATUS_TEXT, histEnds, histStatus, bomOfItem, whereUsed, traceTree } from './core.js';
+import * as sync from './sync.js';
+import { LABEL, statusText } from './report.js';
 import { esc, icon, modal, toast, confirmDialog } from './ui.js';
 import { scanBarcode } from './scanner.js';
 
@@ -20,7 +22,7 @@ export function openStock(no, preset = {}) {
   let mode = preset.mode === 'out' ? 'out' : 'in';
   const m = modal({
     title: 'Ubah stok',
-    body: `<div class="part-head"><strong>${k ? `<span class="ktag ${k}">${KIND_TAG[k]}</span> ` : ''}${esc(p.name)}</strong><span class="muted">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''}</span></div>
+    body: `<div class="part-head"><strong>${k ? `<span class="ktag ${k}">${KIND_TAG[k]}</span> ` : ''}${esc(p.name)}</strong><span class="muted">${esc(p.no)}${p.spec ? ' · ' + esc(p.spec) : ''} · <b>${STATUS_TEXT[invStatus(p)]}</b></span></div>
       <div class="stock-now"><span>Lokasi <span class="loc">${codeOf(p) || '–'}</span></span><span>Stok <b>${qty}</b></span></div>
       ${asm ? `<p class="asmline">Sedang di assembly: <b>${asm}</b> unit <button type="button" class="linkbtn" id="allasm">Terima semua</button></p>` : ''}
       <div class="seg"><button data-mode="in" aria-pressed="${mode === 'in'}">Masuk</button><button data-mode="out" aria-pressed="${mode === 'out'}">Keluar</button></div>
@@ -33,14 +35,17 @@ export function openStock(no, preset = {}) {
         ${canLoc ? `<div class="grid3" id="locrow"><label>Simpan di rak<select name="lrack"><option value="">— nanti saja —</option>${S.racks.map((r) => `<option value="${esc(r.id)}">Rak ${esc(r.id)}</option>`).join('')}</select></label>
           <label>Kolom<select name="lcol" disabled></select></label><label>Baris<select name="lrow" disabled></select></label></div>` : ''}
         <p class="preview">Stok setelah disimpan: <b id="after"></b></p><p class="err" id="serr" role="alert"></p></form>`,
-    footer: `${can(S.user, 'stock') ? '<button class="btn" id="editpart" style="margin-right:auto">Edit part</button>' : ''}<button class="btn" data-close>Batal</button><button class="btn primary" id="ssave">Simpan</button>`,
+    footer: `<button class="btn" id="detailbtn" style="margin-right:auto">Detail</button>${can(S.user, 'stock') ? '<button class="btn" id="editpart">Edit</button>' : ''}<button class="btn" data-close>Batal</button><button class="btn primary" id="ssave">Simpan</button>`,
   });
   const amt = m.$('#amt'), reasonSel = m.$('#reason');
   const val = () => Number(amt.value);
   const delta = () => (mode === 'in' ? val() : -val());
-  const reasons = () => (mode === 'in' ? IN_REASONS : OUT_REASONS);
+  const reasons = () => (mode === 'in' ? inReasonsFor(p) : OUT_REASONS);
   function fillReasons(keep) {
-    reasonSel.innerHTML = '<option value="">Pilih status…</option>' + reasons().map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
+    reasonSel.innerHTML = '<option value="">Pilih status…</option>' + reasons().map(([c, l]) => {
+      const none = mode === 'in' && c === 'assembly' && k && asm <= 0; // tidak ada produksi yang sedang berjalan
+      return `<option value="${c}"${none ? ' disabled' : ''}>${l}${none ? ' (tidak ada yang di assembly)' : mode === 'in' && c === 'assembly' ? ` (maks. ${asm})` : ''}</option>`;
+    }).join('');
     if (keep && reasons().some(([c]) => c === keep)) reasonSel.value = keep;
   }
   fillReasons(preset.reason || (mode === 'in' && asm ? 'assembly' : ''));
@@ -49,12 +54,13 @@ export function openStock(no, preset = {}) {
   function update() {
     const ok = Number.isInteger(val()) && val() > 0, reason = reasonSel.value;
     const after = qty + delta();
+    const capErr = ok && mode === 'in' && reason === 'assembly' && k && val() > asm ? `Hanya ${asm} unit yang masih di assembly. Maksimal diterima ${asm}.` : '';
     m.$('#after').textContent = ok ? after : '–';
-    m.$('#serr').textContent = ok && after < 0 ? `Stok hanya ${qty}, tidak bisa dikurangi ${val()}.` : '';
+    m.$('#serr').textContent = capErr || (ok && after < 0 ? `Stok hanya ${qty}, tidak bisa dikurangi ${val()}.` : '');
     m.$('#rhint').textContent = reason ? '' : '(wajib dipilih)';
     m.$('#notetxt').textContent = NOTE_LABEL[reason] || NOTE_LABEL[''];
     const noteOk = reason !== 'lain' || m.$('#note').value.trim() !== '';
-    m.$('#ssave').disabled = !ok || after < 0 || !reason || !noteOk;
+    m.$('#ssave').disabled = !ok || after < 0 || !reason || !noteOk || !!capErr;
     const cr = m.$('#closerow');
     if (cr) cr.hidden = !(mode === 'in' && reason === 'assembly');
     if (locRow) locRow.hidden = mode !== 'in';
@@ -88,7 +94,9 @@ export function openStock(no, preset = {}) {
   async function save() {
     if (m.$('#ssave').disabled) return;
     const closeBox = m.$('#closeasm');
-    const r = await adjustStock(no, delta(), m.$('#note').value.trim(), reasonSel.value, !!(closeBox && closeBox.checked && !m.$('#closerow').hidden));
+    const lrk = locRow && !locRow.hidden ? locRow.querySelector('[name=lrack]').value : '';
+    const dest = lrk ? `${lrk}${locRow.querySelector('[name=lcol]').value}${locRow.querySelector('[name=lrow]').value}` : '';
+    const r = await adjustStock(no, delta(), m.$('#note').value.trim(), reasonSel.value, !!(closeBox && closeBox.checked && !m.$('#closerow').hidden), dest);
     if (!r.ok) { m.$('#serr').textContent = r.error; return; }
     if (locRow && !locRow.hidden && locRow.querySelector('[name=lrack]').value) { // barang masuk tanpa lokasi: simpan sekalian di rak yang dipilih
       const cur = S.parts.find((x) => x.no === no) || p;
@@ -103,7 +111,64 @@ export function openStock(no, preset = {}) {
   m.$('#sf').addEventListener('submit', (e) => { e.preventDefault(); save(); });
   const ep = m.$('#editpart');
   if (ep) ep.onclick = () => { m.close(); openPartForm(p); };
+  m.$('#detailbtn').onclick = () => { m.close(); openItemDetail(no); };
   update(); amt.select();
+}
+
+// ---------- Detail item: kode, nama, jenis, qty, status, lokasi, di assembly, asal material, riwayat ----------
+const monthsBack = (n) => Array.from({ length: n }, (_, i) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - i); return d.toISOString().slice(0, 7); });
+const fmtTs = (ts) => new Date(ts).toLocaleString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+function traceHtml(n, root = true) {
+  const tag = n.kind ? `<span class="ktag ${n.kind}">${KIND_TAG[n.kind]}</span> ` : '';
+  const me = root ? '' : `<span class="tn">${tag}<b>${esc(n.name || n.no)}</b> <span class="muted">${esc(n.no)}</span> <span class="tq">× ${n.per}</span> <span class="muted">stok ${n.stock === null ? '–' : n.stock}</span>${n.cycle ? ' <b class="badc">(siklus)</b>' : ''}${n.stock === null ? ' <span class="muted">(belum ada di Part)</span>' : ''}</span>`;
+  const kids = n.children.length ? `<ul class="trace">${n.children.map((c) => traceHtml(c, false)).join('')}</ul>` : '';
+  return root ? kids : `<li>${me}${kids}</li>`;
+}
+
+export function openItemDetail(no) {
+  const p = S.parts.find((x) => x.no === no);
+  if (!p) return;
+  const k = kindOf(p), asm = inAsmOf(p), qty = Number(p.qty) || 0, canEdit = can(S.user, 'stock');
+  const own = bomOfItem(S.bom, p.no), used = whereUsed(S.bom, p.no), tree = own ? traceTree(p.no, S.bom, S.parts) : null;
+  const kv = (l, v) => `<div class="kv"><span class="muted">${l}</span><span>${v}</span></div>`;
+  const m = modal({
+    title: 'Detail item', wide: true,
+    body: `<div class="part-head"><strong>${k ? `<span class="ktag ${k}">${KIND_TAG[k]}</span> ` : ''}${esc(p.name)}</strong><span class="muted">${esc(p.spec || '')}</span></div>
+      <div class="dgrid">
+        ${kv('Kode', `<b class="mono">${esc(p.no)}</b>`)}${kv('Jenis', esc(KIND_LABEL[k]))}${kv('Qty di gudang', `<b>${qty}</b>`)}
+        ${kv('Status', `<b>${STATUS_TEXT[invStatus(p)]}</b>`)}${kv('Lokasi', codeOf(p) ? `<span class="loc">${codeOf(p)}</span>` : '–')}
+        ${k || asm ? kv('Sedang assembly', `<b class="${asm ? 'asmc' : ''}">${asm} unit</b>`) : ''}
+        ${Number(p.sold) > 0 ? kv('Terjual (SOLD) total', `<b>${Number(p.sold)}</b>`) : ''}${Number(p.min) > 0 ? kv('Stok minimum', Number(p.min)) : ''}
+      </div>
+      ${canEdit ? `<div class="dact"><button class="btn small" id="dstock">Ubah stok</button><button class="btn small" id="dedit">Edit item</button>
+        ${k ? '<button class="btn small" id="dsend">Kirim ke assembly</button>' : ''}${k && asm ? '<button class="btn small" id="drecv">Terima dari assembly</button>' : ''}</div>` : ''}
+      ${tree && tree.children.length ? `<p class="section-title">Tersusun dari — ${esc(own.product_name)} (per 1 unit)</p>${traceHtml(tree)}` : ''}
+      ${used.length ? `<p class="section-title">Dipakai di BOM</p><ul class="usedin">${used.map((b) => `<li><span class="ktag ${b.kind === 'jadi' ? 'jadi' : 'wip'}">${KIND_TAG[b.kind === 'jadi' ? 'jadi' : 'wip']}</span> ${esc(b.product_name)} <span class="muted">${esc(b.product_no)} · ${(b.lines.find((l) => l.no === p.no) || {}).qty} per unit</span></li>`).join('')}</ul>` : ''}
+      <p class="section-title">Riwayat item (3 bulan terakhir)</p><div id="ihist" class="ihist"><span class="muted">Memuat…</span></div>`,
+    footer: '<button class="btn primary" data-close>Tutup</button>',
+  });
+  const go = (fn) => () => { m.close(); fn(); };
+  if (canEdit) {
+    m.$('#dstock').onclick = go(() => openStock(no));
+    m.$('#dedit').onclick = go(() => openPartForm(p));
+    if (k) m.$('#dsend').onclick = go(() => openStock(no, { mode: 'out', reason: 'assembly' }));
+    if (k && asm) m.$('#drecv').onclick = go(() => openStock(no, { mode: 'in', reason: 'assembly' }));
+  }
+  Promise.all(monthsBack(3).map((mo) => sync.loadHistory(mo))).then((res) => {
+    const box = m.$('#ihist');
+    if (!box || !box.isConnected) return;
+    const all = res.flatMap((r) => r.items).filter((h) => h.no === no || h.productNo === no).sort((a, b) => (a.ts < b.ts ? 1 : -1)).slice(0, 25);
+    if (!all.length) { box.innerHTML = '<span class="muted">Belum ada riwayat.</span>'; return; }
+    box.innerHTML = '<ul class="hlist">' + all.map((h) => {
+      const mat = h.productNo === no && h.no !== no; // bahan yang dipakai untuk memproduksi item ini
+      const e = histEnds(h), st = h.status || histStatus(h) || '', lab = mat ? 'Bahan produksi' : (LABEL[h.action] || [h.action])[0];
+      const qtyTxt = h.action === 'asm_send' ? `${h.delta} unit` : typeof h.delta === 'number' && h.delta ? `${h.delta > 0 ? '+' : ''}${h.delta}` : '';
+      return `<li><b>${fmtTs(h.ts)}</b> · ${esc(lab)}${mat ? ` <span class="mono">${esc(h.no)}</span>` : ''} ${qtyTxt ? `<b>${qtyTxt}</b>` : ''}
+        ${statusText(h) ? `<span class="muted"> · ${esc(statusText(h))}</span>` : ''}${st ? ` <span class="ktag">${st}</span>` : ''}
+        ${e.from || e.to ? `<span class="muted"> · ${esc(e.from)} → ${esc(e.to)}</span>` : ''}${h.run ? ` <span class="muted">· run ${esc(h.run)}</span>` : ''}${h.note ? `<span class="muted"> · ${esc(h.note)}</span>` : ''}</li>`;
+    }).join('') + '</ul>';
+  }).catch(() => { const box = m.$('#ihist'); if (box) box.innerHTML = '<span class="muted">Riwayat tidak bisa dimuat.</span>'; });
 }
 
 // part = null → part baru. onSaved(no, isNew) dipanggil setelah tersimpan.
@@ -117,7 +182,7 @@ export function openPartForm(part, { onSaved, preset } = {}) {
       <label>No item<span class="inrow"><input name="no" value="${esc(p.no)}" ${isNew ? '' : 'readonly'} autocomplete="off">${isNew ? `<button type="button" class="icon-btn" id="scanno" aria-label="Pindai barcode no item">${icon('camera')}</button>` : ''}</span></label>
       <label>Nama part<input name="name" value="${esc(p.name)}" autocomplete="off"></label>
       <label>Spesifikasi<input name="spec" value="${esc(p.spec || '')}" autocomplete="off"></label>
-      <label>Jenis<select name="kind"><option value="">Part (komponen)</option><option value="wip"${kindOf(p) === 'wip' ? ' selected' : ''}>WIP (setengah jadi)</option><option value="jadi"${kindOf(p) === 'jadi' ? ' selected' : ''}>Produk jadi</option></select></label>
+      <label>Jenis${S.bom.some((b) => String(b.product_no) === String(p.no)) ? ' <span class="hint" style="color:var(--ink-2)">(ikut BOM)</span>' : ''}<select name="kind"${S.bom.some((b) => String(b.product_no) === String(p.no)) ? ' disabled' : ''}><option value="">Part (komponen)</option><option value="wip"${kindOf(p) === 'wip' ? ' selected' : ''}>WIP (setengah jadi)</option><option value="jadi"${kindOf(p) === 'jadi' ? ' selected' : ''}>Produk jadi</option></select></label>
       ${isNew ? `<label>Qty awal<input name="qty" type="number" inputmode="numeric" min="0" step="1" value="${p.qty}"></label>` : ''}
       <label>Stok minimum (opsional)<input name="min" type="number" inputmode="numeric" min="0" step="1" value="${Number(p.min) > 0 ? Number(p.min) : ''}" placeholder="kosong / 0 = tanpa peringatan"></label>
       <div class="grid3">
@@ -150,7 +215,7 @@ export function openPartForm(part, { onSaved, preset } = {}) {
     const min = el('min').value.trim() === '' ? 0 : Number(el('min').value);
     if (!Number.isInteger(min) || min < 0) return err('Stok minimum harus bilangan bulat, minimal 0.');
     const rack = el('rack').value;
-    const part2 = { no, name, spec: el('spec').value.trim(), qty, min, kind: el('kind').value, rack, col: rack ? Number(el('col').value) : null, row: rack ? Number(el('row').value) : null };
+    const part2 = { no, name, spec: el('spec').value.trim(), qty, min, kind: el('kind').disabled ? kindOf(p) : el('kind').value, rack, col: rack ? Number(el('col').value) : null, row: rack ? Number(el('row').value) : null };
     const r = await savePart(part2, isNew);
     if (!r.ok) return err(r.error);
     m.close();

@@ -5,7 +5,7 @@ import { matchParts, inScope } from './search.js';
 import { readWorkbook, writeWorkbook, downloadBytes } from './xlsx.js';
 import { parsePartSheets, partsToSheet, partTemplate } from './sheets.js';
 import { $, esc, icon, modal, toast, pickFile, today } from './ui.js';
-import { openStock } from './forms.js';
+import { openStock, openItemDetail } from './forms.js';
 import { bomTab } from './bom.js';
 import { opnameTab } from './opname.js';
 
@@ -43,7 +43,7 @@ function partTab(acts, body) {
       <div class="tbl"><div class="trow thead"><span>No Item</span><span>Nama Part</span><span class="hide-m">Spesifikasi</span><span>Lokasi</span><span class="r">Qty</span></div>
       ${list.slice(0, shown).map((p) => {
         const q = Number(p.qty) || 0;
-        return `<div class="trow${canEdit ? ' click' : ''}" data-no="${esc(p.no)}"${canEdit ? ' tabindex="0" role="button"' : ''}>
+        return `<div class="trow click" data-no="${esc(p.no)}" tabindex="0" role="button">
           <span class="mono">${esc(p.no)}</span><span class="tname">${kindOf(p) ? `<span class="ktag ${kindOf(p)}">${KIND_TAG[kindOf(p)]}</span> ` : ''}${esc(p.name)}${kindOf(p) && inAsmOf(p) ? ` <b class="asmc">· di assembly ${inAsmOf(p)}</b>` : ''}</span><span class="hide-m muted tname">${esc(p.spec || '')}</span>
           <span>${p.rack ? `<span class="loc">${esc(p.rack)}${p.col}${p.row}</span>` : '<span class="muted">–</span>'}</span>
           <span class="qty r${q <= 0 ? ' zero' : isLow(p) ? ' low' : ''}"${isLow(p) ? ` title="Stok minimum ${minOf(p)}"` : ''}>${q}${minOf(p) ? `<small class="qmin">min ${minOf(p)}</small>` : ''}</span></div>`;
@@ -57,10 +57,10 @@ function partTab(acts, body) {
   body.addEventListener('click', (e) => {
     if (e.target.closest('#more')) { shown += 300; render(); return; }
     const row = e.target.closest('.trow.click');
-    if (row) openStock(row.dataset.no);
+    if (row) (canEdit ? openStock : openItemDetail)(row.dataset.no); // non-editor: lihat detail saja
   });
   body.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('click')) { e.preventDefault(); openStock(e.target.dataset.no); }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('click')) { e.preventDefault(); (canEdit ? openStock : openItemDetail)(e.target.dataset.no); }
   });
 
   acts.querySelector('#exp').onclick = () => {

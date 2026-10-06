@@ -46,8 +46,65 @@ export const REASON_SHORT = {
   out: { assembly: 'Ke assembly', customer: 'Ke customer', lain: 'Lainnya' },
 };
 // Arah & status sebuah entri riwayat. Entri lama tanpa status: pemakaian BOM dianggap "ke assembly".
-export const reasonDir = (h) => (h.action === 'stock_in' ? 'in' : h.action === 'stock_out' || h.action === 'bom_use' ? 'out' : '');
+export const reasonDir = (h) => (h.action === 'stock_in' || h.action === 'asm_return' ? 'in' : h.action === 'stock_out' || h.action === 'bom_use' ? 'out' : '');
 export const reasonOf = (h) => h.reason || (h.action === 'bom_use' ? 'assembly' : '');
+// Menerima hasil assembly (WIP / produk jadi) punya aksi sendiri di riwayat: asm_return (ASSEMBLY_RETURN).
+export const isReturn = (h) => h.action === 'asm_return';
+// Status "Dari proses assembly" hanya untuk WIP / produk jadi (part biasa tidak punya produksi yang bisa diterima kembali).
+export const inReasonsFor = (p) => (kindOf(p) ? IN_REASONS : IN_REASONS.filter(([c]) => c !== 'assembly'));
+
+// ---------- Status inventory (diturunkan dari jenis + jumlah; tidak disimpan di data) ----------
+export const STATUS_TEXT = { AVAILABLE: 'AVAILABLE', OUT_OF_STOCK: 'HABIS', WIP: 'WIP', FINISHED_GOOD: 'FINISHED_GOOD', IN_ASSEMBLY: 'IN_ASSEMBLY', SOLD: 'SOLD', ADJUSTED: 'ADJUSTED' };
+export function invStatus(p) {
+  const k = kindOf(p), q = Number(p && p.qty) || 0;
+  if (k && q <= 0 && inAsmOf(p) > 0) return 'IN_ASSEMBLY';
+  if (k === 'wip') return 'WIP';
+  if (k === 'jadi') return 'FINISHED_GOOD';
+  return q > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK';
+}
+// Status inventory sebuah barang SETELAH pergerakan di riwayat: keluar ke customer = SOLD, ke assembly = IN_ASSEMBLY, dst.
+export function histStatus(h) {
+  const d = reasonDir(h), r = reasonOf(h);
+  if (h.action === 'asm_send') return 'IN_ASSEMBLY';
+  if (!d || !r) return '';
+  if (d === 'out') return r === 'customer' ? 'SOLD' : r === 'assembly' ? 'IN_ASSEMBLY' : 'ADJUSTED';
+  return h.kind === 'wip' ? 'WIP' : h.kind === 'jadi' ? 'FINISHED_GOOD' : 'AVAILABLE';
+}
+// Asal → tujuan pergerakan. Selalu diturunkan dari aksi + status + lokasi, jadi entri lama pun tetap terbaca.
+export function histEnds(h) {
+  const d = reasonDir(h), r = reasonOf(h), here = h.loc || 'GUDANG';
+  if (h.action === 'asm_send') return { from: 'GUDANG', to: 'ASSEMBLY' };
+  if (!d || !r) return { from: '', to: '' };
+  if (d === 'in') return { from: { pembelian: 'SUPPLIER', assembly: 'ASSEMBLY', lain: 'LAINNYA' }[r] || '', to: here };
+  return { from: here, to: { assembly: 'ASSEMBLY', customer: 'CUSTOMER', lain: 'LAINNYA' }[r] || '' };
+}
+
+// ---------- Traceability: Produk jadi → BOM → WIP → BOM → Part ----------
+export const bomOfItem = (boms, no) => boms.find((b) => String(b.product_no) === String(no)) || null;
+export const whereUsed = (boms, no) => boms.filter((b) => b.lines.some((l) => l.no === no));
+// Pohon "tersusun dari" untuk 1 unit item. per = jumlah kumulatif per 1 unit item akar. Aman dari siklus.
+export function traceTree(no, boms, parts, per = 1, path = []) {
+  const p = parts.find((x) => x.no === no), bom = bomOfItem(boms, no);
+  const node = { no, name: p ? p.name : bom ? bom.product_name : '', kind: p ? kindOf(p) : bom ? bomKind(bom) : '', per, stock: p ? Number(p.qty) || 0 : null, children: [], cycle: false, hasBom: !!bom };
+  if (!bom) return node;
+  if (path.includes(no)) { node.cycle = true; node.children = []; return node; }
+  if (path.length >= 8) return node;
+  node.children = bom.lines.map((l) => traceTree(l.no, boms, parts, per * l.qty, [...path, no]));
+  return node;
+}
+// Apakah `bom` (baru/diubah) membuat produk memakai dirinya sendiri, langsung atau lewat WIP lain? Hasil: jalur siklus atau null.
+export function bomCycle(boms, bom) {
+  const map = new Map(boms.filter((b) => b.id !== bom.id).map((b) => [String(b.product_no), b]));
+  map.set(String(bom.product_no), bom);
+  const dfs = (no, path) => {
+    if (path.includes(no)) return [...path, no];
+    const b = map.get(no);
+    if (!b) return null;
+    for (const l of b.lines) { const r = dfs(String(l.no), [...path, no]); if (r) return r; }
+    return null;
+  };
+  return dfs(String(bom.product_no), []);
+}
 
 // ---------- BOM: kebutuhan vs stok untuk `units` unit produk ----------
 export function bomCheck(bom, parts, units = 1) {
@@ -160,8 +217,13 @@ export function applyOp(op, kind, items) {
       const cur = items.find((x) => x.no === op.no);
       if (cur) {
         cur.qty = Math.max(0, (Number(cur.qty) || 0) + op.delta);
-        // Hasil assembly (WIP / produk jadi) yang masuk gudang mengurangi jumlah yang masih di assembly.
-        if (kindOf(cur) && op.delta > 0 && op.reason === 'assembly') cur.inAsm = op.closeAsm ? 0 : Math.max(0, inAsmOf(cur) - op.delta);
+        if (kindOf(cur) && op.reason === 'assembly') {
+          // Hasil assembly (WIP / produk jadi) masuk gudang mengurangi jumlah yang masih di assembly;
+          // dikirim lagi ke assembly (lanjutan / rework) menambah jumlah yang sedang dikerjakan.
+          if (op.delta > 0) cur.inAsm = op.closeAsm ? 0 : Math.max(0, inAsmOf(cur) - op.delta);
+          else cur.inAsm = inAsmOf(cur) - op.delta;
+        }
+        if (op.reason === 'customer' && op.delta < 0) cur.sold = (Number(cur.sold) || 0) - op.delta; // total terjual (SOLD)
       }
     } else if (op.type === 'stock.batch') {
       for (const a of op.adjusts) {

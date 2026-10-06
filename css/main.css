@@ -72,7 +72,7 @@ button{cursor:pointer}
 .list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--line);
   font-weight:600;font-size:14px}
 .list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1;min-height:0;-webkit-overflow-scrolling:touch}
-.row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:8px;padding:8px 6px 8px 14px;
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto auto;align-items:center;gap:8px;padding:8px 6px 8px 14px;
   border-bottom:1px solid var(--line);cursor:pointer}
 .row:hover{background:var(--panel-2)}
 .row.sel{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
@@ -234,7 +234,7 @@ button{cursor:pointer}
 .nav button{position:relative}
 [data-layout=mobile] .nbadge{position:absolute;top:4px;left:calc(50% + 6px)}
 .seclabel{padding:6px 14px;font-size:12px;font-weight:700;color:var(--ink-2);background:var(--panel-2);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:1}
-.prodhit{grid-template-columns:minmax(0,1fr) auto auto auto}
+.prodhit{grid-template-columns:minmax(0,1fr) auto auto auto auto}
 .ptag{padding:2px 9px;border-radius:12px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent)}
 .chev{font-size:22px;color:var(--ink-2);padding:0 6px}
 .bomhead{padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;flex-direction:column;gap:8px;position:sticky;top:0;z-index:2}
@@ -335,3 +335,18 @@ button{cursor:pointer}
 .bh-out{margin:0;font-size:13px;color:var(--ink-2)}
 .hstat{display:block;margin-top:2px;font-size:12px;color:var(--ink-2)}
 .pv-top select#kindf{height:34px;padding:0 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:14px}
+
+/* ---------- Tahap 6: detail item, traceability, status inventory ---------- */
+.stt{font-size:12px;letter-spacing:.2px}
+.stt.wip{color:var(--warn)}.stt.jadi{color:var(--ok)}
+.dgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;margin-bottom:10px}
+[data-layout=mobile] .dgrid{grid-template-columns:1fr}
+.dgrid .kv{border-bottom:1px solid var(--line)}
+.dact{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+ul.trace,ul.usedin,ul.hlist{list-style:none;margin:4px 0 0;padding:0}
+ul.trace ul.trace{margin-left:18px;padding-left:10px;border-left:2px solid var(--line)}
+ul.trace li{padding:3px 0;font-size:14px}
+.tq{font:700 13px var(--mono);color:var(--accent)}
+ul.usedin li{padding:3px 0;font-size:14px}
+ul.hlist li{padding:6px 0;border-bottom:1px solid var(--line);font-size:13.5px;line-height:1.5}
+.ihist{max-height:240px;overflow:auto}

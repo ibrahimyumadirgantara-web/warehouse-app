@@ -136,7 +136,7 @@ export function bomTab(acts, body) {
     go.onclick = async () => {
       go.disabled = true;
       let n = 0;
-      for (const r of okRes) { const x = await saveBom(r.bom, r.newParts, file.name); if (x.ok) n++; }
+      for (const r of okRes) { const x = await saveBom(r.bom, r.newParts, file.name); if (x.ok) n++; else toast(x.error, 'error'); }
       m.close();
       toast(`${n} BOM diimpor`, 'ok');
     };

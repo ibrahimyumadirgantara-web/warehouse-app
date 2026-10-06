@@ -1,7 +1,7 @@
 // store.js — state aplikasi + aksi. Perubahan langsung terlihat (lokal), lalu masuk antrean sync.
 import * as db from './db.js';
 import * as sync from './sync.js';
-import { applyOp, uid, codeOf, clampRack, hashPassword, randomSalt, makeUser, bomCheck, kindOf, bomKind, inAsmOf, IN_REASONS, OUT_REASONS, REASON_SHORT } from './core.js';
+import { applyOp, uid, codeOf, clampRack, hashPassword, randomSalt, makeUser, bomCheck, kindOf, bomKind, inAsmOf, inReasonsFor, OUT_REASONS, REASON_SHORT, histStatus, bomCycle } from './core.js';
 
 export const S = { parts: [], racks: [], users: [], bom: [], user: null };
 const subs = new Set();
@@ -53,28 +53,42 @@ async function commit(op) {
 const crossedLow = (p, before, after) => (Number(p.min) > 0 && before > Number(p.min) && after <= Number(p.min) ? [{ no: p.no, name: p.name, qty: after, min: Number(p.min) }] : []);
 
 // reason: status pergerakan (lihat IN_REASONS / OUT_REASONS). closeAsm: saat menerima hasil assembly, tutup sisa yang masih "di assembly".
-export async function adjustStock(no, delta, note = '', reason = '', closeAsm = false) {
+// Aturan: keluar tidak boleh melebihi stok; "Dari proses assembly" hanya untuk WIP / produk jadi dan tidak boleh melebihi jumlah yang masih di assembly.
+export async function adjustStock(no, delta, note = '', reason = '', closeAsm = false, destLoc = '') {
   const p = S.parts.find((x) => x.no === no);
   if (!p) return { ok: false, error: 'Part tidak ditemukan.' };
   if (!Number.isInteger(delta) || delta === 0) return { ok: false, error: 'Jumlah harus bilangan bulat.' };
-  const dir = delta > 0 ? 'in' : 'out';
-  if (!(dir === 'in' ? IN_REASONS : OUT_REASONS).some(([c]) => c === reason)) return { ok: false, error: 'Pilih status pergerakan stok dulu.' };
+  const dir = delta > 0 ? 'in' : 'out', k = kindOf(p);
+  if (dir === 'in' && reason === 'assembly' && !k) return { ok: false, error: 'Status “Dari proses assembly” hanya untuk WIP / produk jadi. Untuk retur part gunakan “Lainnya”.' };
+  if (!(dir === 'in' ? inReasonsFor(p) : OUT_REASONS).some(([c]) => c === reason)) return { ok: false, error: 'Pilih status pergerakan stok dulu.' };
   note = String(note || '').trim();
   if (reason === 'lain' && !note) return { ok: false, error: 'Status “Lainnya” wajib diberi alasan.' };
+  const asm = inAsmOf(p);
+  const isReturn = dir === 'in' && reason === 'assembly';
+  if (isReturn) {
+    if (asm <= 0) return { ok: false, error: `Tidak ada produksi ${p.name} yang sedang di assembly. Kirim dulu ke assembly lewat BOM-nya.` };
+    if (delta > asm) return { ok: false, error: `Hanya ${asm} unit yang masih di assembly. Maksimal diterima ${asm}.` };
+  }
   const before = Number(p.qty) || 0, after = before + delta;
   if (after < 0) return { ok: false, error: 'Stok tidak cukup.' };
   const low = crossedLow(p, before, after);
-  const closing = !!closeAsm && dir === 'in' && reason === 'assembly' && !!kindOf(p) && inAsmOf(p) > 0;
+  const closing = !!closeAsm && isReturn && asm > delta;
+  // barang masuk + rak baru dipilih: lokasi (tujuan) di riwayat = rak itu
+  const hist = { no, name: p.name, delta, after, loc: (dir === 'in' && destLoc) || codeOf(p), reason, kind: k, note: closing ? [note, 'sisa di assembly ditutup'].filter(Boolean).join(' · ') : note };
+  hist.status = histStatus({ action: isReturn ? 'asm_return' : delta > 0 ? 'stock_in' : 'stock_out', reason, kind: k });
   await commit({
     type: 'stock.adjust', no, delta, reason, ...(closing ? { closeAsm: true } : {}),
     msg: `Stok ${no} ${delta > 0 ? '+' : ''}${delta} (${REASON_SHORT[dir][reason]})`,
-    history: H(delta > 0 ? 'stock_in' : 'stock_out', { no, name: p.name, delta, after, loc: codeOf(p), reason, note: closing ? [note, 'sisa di assembly ditutup'].filter(Boolean).join(' · ') : note }),
+    history: H(isReturn ? 'asm_return' : delta > 0 ? 'stock_in' : 'stock_out', hist),
   });
   return { ok: true, after, low };
 }
 
 export async function savePart(part, isNew) {
   if (isNew && S.parts.some((p) => p.no === part.no)) return { ok: false, error: 'No item sudah dipakai part lain.' };
+  const cur = S.parts.find((p) => p.no === part.no), bom = S.bom.find((b) => String(b.product_no) === String(part.no));
+  if (bom) part = { ...part, kind: bomKind(bom) }; // hasil sebuah BOM: jenisnya ikut BOM (tidak bisa jadi Part biasa)
+  else if (cur && kindOf(cur) && !kindOf(part) && inAsmOf(cur) > 0) return { ok: false, error: `Masih ada ${inAsmOf(cur)} unit di assembly. Terima / tutup dulu sebelum mengubah jenis menjadi Part.` };
   await commit({
     type: 'part.upsert', part, isNew,
     msg: `${isNew ? 'Part baru' : 'Ubah part'} ${part.no}`,
@@ -118,6 +132,9 @@ export async function changePassword(username, password) {
 export async function deletePart(no) {
   const p = S.parts.find((x) => x.no === no);
   if (!p) return { ok: false, error: 'Part tidak ditemukan.' };
+  if (inAsmOf(p) > 0) return { ok: false, error: `Masih ada ${inAsmOf(p)} unit di assembly. Terima / tutup dulu.` };
+  const own = S.bom.find((b) => String(b.product_no) === String(no));
+  if (own) return { ok: false, error: `Item ini adalah hasil BOM “${own.product_name}”. Hapus BOM-nya dulu.` };
   await commit({
     type: 'part.delete', no, msg: `Part ${no} dihapus`,
     history: H('part_delete', { no, name: p.name, loc: codeOf(p), delta: -(Number(p.qty) || 0), after: 0 }),
@@ -141,6 +158,8 @@ export async function importParts(rows, update, fileName) {
 export async function saveBom(bom, newParts, fileName) {
   const replaced = S.bom.some((b) => b.id === bom.id);
   bom = { ...bom, kind: bomKind(bom) };
+  const cyc = bomCycle(S.bom, bom);
+  if (cyc) return { ok: false, error: `BOM ${bom.product_no} memakai dirinya sendiri (${cyc.join(' → ')}).` };
   await commit({
     type: 'bom.upsert', bom, newParts, output: { no: bom.product_no, name: bom.product_name, kind: bom.kind },
     msg: `BOM ${bom.product_no} ${replaced ? 'diganti' : 'diimpor'}`,
@@ -171,6 +190,8 @@ export async function editBom(id, name, lines, kind) {
   const newKind = kind === 'jadi' || kind === 'wip' ? kind : bomKind(old), kindChanged = newKind !== bomKind(old);
   if (!added && !removed && !changed && !renamed && !kindChanged) return { ok: true, unchanged: true };
   const bom = { ...old, kind: newKind, product_name: name, lines: lines.map((l) => ({ no: l.no, qty: l.qty, name: (S.parts.find((p) => p.no === l.no) || {}).name || l.name || '' })) };
+  const cyc = bomCycle(S.bom, bom);
+  if (cyc) return { ok: false, error: `BOM ${bom.product_no} memakai dirinya sendiri (${cyc.join(' → ')}).` };
   const bits = [added && `${added} part ditambah`, removed && `${removed} part dihapus`, changed && `${changed} qty diubah`, renamed && 'nama diubah', kindChanged && `hasil jadi ${newKind === 'jadi' ? 'produk jadi' : 'WIP'}`].filter(Boolean);
   await commit({
     type: 'bom.upsert', bom, output: { no: bom.product_no, name: bom.product_name, kind: newKind }, msg: `BOM ${bom.product_no} diubah`,
@@ -240,14 +261,15 @@ export async function consumeBom(bomId, units) {
   const chk = bomCheck(bom, S.parts, units);
   if (chk.missing) return { ok: false, error: `${chk.missing} part belum ada di daftar Part. Tambahkan dulu.` };
   if (!chk.ok) return { ok: false, error: `Stok kurang untuk ${chk.short} part: ${chk.lines.filter((l) => l.lack > 0).slice(0, 3).map((l) => `${l.no} (kurang ${l.lack})`).join(', ')}${chk.short > 3 ? ', …' : ''}` };
-  const ts = new Date().toISOString(), note = `${units} unit · ${bom.product_no}`, kind = bomKind(bom);
+  const ts = new Date().toISOString(), note = `${units} unit · ${bom.product_no}`, kind = bomKind(bom), run = uid().slice(0, 8).toUpperCase();
   const adjusts = [], histories = [], low = [];
   for (const l of chk.lines) {
     adjusts.push({ no: l.no, delta: -l.need });
-    histories.push(H('bom_use', { ts, no: l.no, name: l.part.name, delta: -l.need, after: l.stock - l.need, loc: codeOf(l.part), reason: 'assembly', note, product: bom.product_name, productNo: bom.product_no, units }));
+    histories.push(H('bom_use', { ts, no: l.no, name: l.part.name, delta: -l.need, after: l.stock - l.need, loc: codeOf(l.part), reason: 'assembly', kind: kindOf(l.part), status: 'IN_ASSEMBLY', note, product: bom.product_name, productNo: bom.product_no, units, run }));
     low.push(...crossedLow(l.part, l.stock, l.stock - l.need));
   }
-  histories.push(H('asm_send', { ts, no: bom.product_no, name: bom.product_name, delta: units, note: `${units} unit ${kind === 'jadi' ? 'produk jadi' : 'WIP'} dikerjakan di assembly · ${chk.lines.length} part dikirim` }));
+  // Rekam resep saat produksi (snapshot) supaya asal material tetap bisa ditelusuri walau BOM diubah kemudian.
+  histories.push(H('asm_send', { ts, no: bom.product_no, name: bom.product_name, delta: units, kind, status: 'IN_ASSEMBLY', run, bomLines: bom.lines.map((l) => ({ no: l.no, qty: l.qty })), note: `${units} unit ${kind === 'jadi' ? 'produk jadi' : 'WIP'} dikerjakan di assembly · ${chk.lines.length} part dikirim` }));
   await commit({ type: 'stock.batch', adjusts, histories, asm: { no: bom.product_no, name: bom.product_name, kind, units }, msg: `Kirim ke assembly ${units} × ${bom.product_no}` });
   return { ok: true, count: adjusts.length, units, low, kind };
 }
